@@ -1,0 +1,78 @@
+# =====================================================
+# Environment Variables
+# =====================================================
+.env
+.env.*
+
+# =====================================================
+# Python
+# =====================================================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ENV/
+env/
+
+# Python tooling / packaging
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# =====================================================
+# Node / React
+# =====================================================
+node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =====================================================
+# Compiled Artifacts
+# =====================================================
+*.class
+
+# =====================================================
+# Local Databases / Runtime Files
+# =====================================================
+*.db
+*.sqlite
+
+# =====================================================
+# IDE / Editor
+# =====================================================
+.vscode/
+.idea/
+*.pydevproject
+*.project
+
+# =====================================================
+# Tethys Runtime / Generated Assets
+# =====================================================
+tethysapp/fimeval_gui/public/frontend/*
+!tethysapp/fimeval_gui/public/frontend/.gitkeep
+tethysapp/fimeval_gui/public/workspaces/user_workspaces/*
+
+# =====================================================
+# Geospatial Data (fully ignored)
+# =====================================================
+*.gpkg
+*.geojson
+*.GeoJSON
+*.mbtiles
+*.pmtiles
+*.tif
+*.tiff
+
+# =====================================================
+# OS Junk
+# =====================================================
+.DS_Store
+Thumbs.db
+
+# Visual brainstorming sessions
+.superpowers/

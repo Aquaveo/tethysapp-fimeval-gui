@@ -1,0 +1,23 @@
+{% load static tethys %}
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ tethys_app.name }}</title>
+
+    <!-- React CSS bundle -->
+    <link rel="stylesheet"
+          href="{% static tethys_app|public:'frontend/main.css' %}">
+  </head>
+
+  <body style="margin: 0;">
+    <div id="root"></div>
+
+    <!-- React JS bundle -->
+    <script type="module"
+            src="{% static tethys_app|public:'frontend/main.js' %}">
+    </script>
+  </body>
+</html>
