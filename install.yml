@@ -15,5 +15,8 @@ requirements:
     - nodejs
 
   pip:
+    - boto3
+    - "moto[s3]"
+    - "dask[distributed]"
 
 post:
