@@ -48,7 +48,7 @@ class App(TethysAppBase):
         SchedulerSetting(
             name='dask_primary',
             description='Primary Dask scheduler for async FIMeval jobs',
-            scheduler_service='dask',
+            engine=SchedulerSetting.DASK,
             required=True,
         ),
     )
