@@ -10,25 +10,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-The app lives under `fimbench-gui/`:
+The repository root contains:
 ```
-fimbench-gui/
 ├── pyproject.toml
 ├── install.yml                  # Tethys + conda deps
 ├── reactapp/                    # React/TypeScript frontend (Vite)
 │   └── src/
 │       ├── main.tsx             # React entry point
-│       ├── App.tsx              # Root component, top-level state
-│       ├── config.ts
-│       └── types/catalog.ts
-│   └── components/
-│       ├── FilterSidebar.tsx
-│       ├── Map.tsx
-│       └── FIMTable.tsx
-└── tethysapp/fimbench_gui/
+│       └── App.tsx              # Root component, top-level state
+└── tethysapp/fimeval_gui/
     ├── app.py                   # TethysAppBase config + custom settings
     ├── controllers.py           # Two endpoints: home (SPA) + tile_proxy
-    ├── templates/fimbench_gui/index.html
+    ├── templates/fimeval_gui/index.html
     ├── public/frontend/         # ← Vite build output goes here
     ├── scripts/                 # Utility scripts (download, tile gen, COG conversion)
     └── tests/tests.py
@@ -41,8 +34,6 @@ All backend commands assume an active Tethys conda environment.
 ### Backend
 
 ```bash
-cd fimbench-gui
-
 # Install app in development mode
 tethys install -d
 
@@ -50,23 +41,23 @@ tethys install -d
 tethys manage start
 
 # Run all tests
-tethys manage test tethysapp/fimbench_gui/tests
+tethys manage test tethysapp/fimeval_gui/tests
 
 # Run a single test method
-tethys manage test tethysapp/fimbench_gui/tests.TestCase.test_home_controller
+tethys manage test tethysapp/fimeval_gui/tests.TestCase.test_home_controller
 ```
 
 ### Frontend
 
 ```bash
-cd fimbench-gui/reactapp
+cd reactapp
 
 npm install
 
 # Dev server (port 5173, proxies /apps to localhost:8000)
 npm run dev
 
-# Production build → outputs to ../tethysapp/fimbench_gui/public/frontend/
+# Production build → outputs to ../tethysapp/fimeval_gui/public/frontend/
 npm run build
 
 # Type check
@@ -82,10 +73,10 @@ This is a **Tethys Platform 4** app (Django-based) with a React SPA frontend. Th
 
 ### Request Flow
 
-1. Any request to `/apps/fimbench-gui/**` hits the `home()` controller (configured `catch_all=True`)
+1. Any request to `/apps/fimeval-gui/**` hits the `home()` controller (configured `catch_all=True`)
 2. Django renders `index.html`, which loads the Vite-built React bundle from `public/frontend/`
 3. React fetches the FIM catalog JSON from MinIO (`http://127.0.0.1:9000/fimbench/FIM_Viz/catalog_core.json`)
-4. Map vector tiles are fetched via the `tile_proxy()` controller (`/apps/fimbench-gui/tile-proxy/{z}/{x}/{tile}`), which proxies to MinIO and forwards gzip-compressed MVT tiles
+4. Map vector tiles are fetched via the `tile_proxy()` controller (`/apps/fimeval-gui/tile-proxy/{z}/{x}/{tile}`), which proxies to MinIO and forwards gzip-compressed MVT tiles
 5. The table displays catalog metadata and direct MinIO download links for GeoTIFF and JSON files
 
 ### Frontend State (App.tsx)
