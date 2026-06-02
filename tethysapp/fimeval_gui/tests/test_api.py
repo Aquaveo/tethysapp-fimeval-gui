@@ -164,3 +164,87 @@ class TestUploadEndpoint(TethysTestCase):
             )
         self.assertEqual(response.status_code, 503)
         self.assertIn('error', json.loads(response.content))
+
+
+class TestSubmitEndpoint(TethysTestCase):
+    def setUp(self):
+        super().setUp()
+        self.mock_s3 = mock_aws()
+        self.mock_s3.start()
+        boto3.client('s3', region_name='us-east-1').create_bucket(Bucket=BUCKET)
+
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.mock_app.get_custom_setting.side_effect = _app_settings_side_effect
+
+        # Mock job manager to avoid hitting real Tethys DaskJob infrastructure
+        self.mock_job = MagicMock()
+        self.mock_job.id = 99
+        self.mock_app.get_job_manager.return_value.create_job.return_value = self.mock_job
+
+        self.user = self.create_test_user(username='bob', password='pw', email='b@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        self.mock_s3.stop()
+        super().tearDown()
+
+    def _put_upload(self, upload_id):
+        user_id = str(self.user.id)
+        boto3.client('s3', region_name='us-east-1').put_object(
+            Bucket=BUCKET,
+            Key=f'uploads/{user_id}/{upload_id}/benchmark.tif',
+            Body=b'b',
+        )
+
+    def test_submit_returns_job_id_and_status(self):
+        self._put_upload('u1')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['job_id'], 99)
+        self.assertEqual(body['status'], 'submitted')
+
+    def test_submit_calls_job_execute(self):
+        self._put_upload('u2')
+        self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u2', 'method': 'convex_hull'}),
+            content_type='application/json',
+        )
+        self.mock_job.execute.assert_called_once()
+
+    def test_submit_rejects_invalid_method(self):
+        self._put_upload('u3')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u3', 'method': 'bootstrap'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_submit_rejects_missing_upload_id(self):
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'method': 'smallest_extent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_submit_returns_404_for_unknown_upload_id(self):
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'nonexistent', 'method': 'smallest_extent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_submit_wrong_method_returns_405(self):
+        response = self.client.get('/apps/fimeval-gui/api/jobs/')
+        self.assertEqual(response.status_code, 405)

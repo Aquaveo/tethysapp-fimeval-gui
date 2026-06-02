@@ -1,11 +1,14 @@
+import json as json_module
 import logging
 import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
 from django.http import JsonResponse
+from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
 from tethysapp.fimeval_gui.app import App
+from tethysapp.fimeval_gui.job_types import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -63,3 +66,62 @@ def api_upload(request):
         'benchmark_key': benchmark_key,
         'candidate_keys': candidate_keys,
     })
+
+
+VALID_METHODS = {'smallest_extent', 'convex_hull'}
+
+
+@controller(url='api/jobs', login_required=True, name='api_jobs_submit')
+def api_jobs_submit(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        body = json_module.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    upload_id = body.get('upload_id')
+    method = body.get('method')
+
+    if not upload_id:
+        return JsonResponse({'error': 'upload_id is required'}, status=400)
+    if method not in VALID_METHODS:
+        return JsonResponse({'error': f'method must be one of {sorted(VALID_METHODS)}'}, status=400)
+
+    user_id = str(request.user.id)
+    storage = _get_storage()
+    if not storage.list_prefix(f'uploads/{user_id}/{upload_id}/'):
+        return JsonResponse({'error': 'upload_id not found'}, status=404)
+
+    s3_config = {
+        'endpoint_url': App.get_custom_setting('minio_endpoint_url'),
+        'access_key': App.get_custom_setting('minio_access_key'),
+        'secret_key': App.get_custom_setting('minio_secret_key'),
+        'bucket': App.get_custom_setting('s3_bucket'),
+    }
+
+    try:
+        scheduler = App.get_scheduler('dask_primary')
+    except Exception:
+        return JsonResponse({'error': 'Dask scheduler not configured'}, status=503)
+
+    job_manager = App.get_job_manager()
+    job = job_manager.create_job(
+        name=f'evaluate_fim_{upload_id}',
+        user=request.user,
+        job_type=DaskJob,
+        scheduler=scheduler,
+    )
+    job.extended_properties = {
+        'upload_id': upload_id,
+        'user_id': user_id,
+        'method': method,
+    }
+    job.dask_delayed = REGISTRY['evaluate_fim'].build_delayed(
+        upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
+    )
+    job.save()
+    job.execute()
+
+    return JsonResponse({'job_id': job.id, 'status': 'submitted'})
