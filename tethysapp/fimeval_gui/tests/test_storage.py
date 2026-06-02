@@ -46,6 +46,10 @@ class TestUpload(unittest.TestCase):
         storage = _make_storage()
         key = storage.upload_fileobj(io.BytesIO(b'tiff data'), 'uploads/1/abc/candidate_0.tif')
         self.assertEqual(key, 'uploads/1/abc/candidate_0.tif')
+        obj = boto3.client('s3', region_name='us-east-1').get_object(
+            Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif'
+        )
+        self.assertEqual(obj['Body'].read(), b'tiff data')
 
 
 class TestList(unittest.TestCase):

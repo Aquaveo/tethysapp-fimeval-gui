@@ -19,6 +19,7 @@ class S3Storage:
         return key
 
     def upload_fileobj(self, fileobj, key: str) -> str:
+        fileobj.seek(0)
         self._client.upload_fileobj(fileobj, self._bucket, key)
         return key
 
