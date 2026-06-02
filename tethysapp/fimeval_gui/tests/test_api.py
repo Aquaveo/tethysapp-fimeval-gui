@@ -1,8 +1,10 @@
 import json
 import os
-from unittest.mock import patch
+import uuid
+from unittest.mock import MagicMock, patch
 
 import boto3
+from botocore.exceptions import ClientError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from moto import mock_aws
 from tethys_sdk.testing import TethysTestCase
@@ -54,6 +56,7 @@ class TestUploadEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
         self.assertIn('upload_id', body)
+        uuid.UUID(body['upload_id'])  # raises ValueError if not a valid UUID
         self.assertIn('benchmark_key', body)
         self.assertIn('candidate_keys', body)
         self.assertEqual(len(body['candidate_keys']), 1)
@@ -122,3 +125,42 @@ class TestUploadEndpoint(TethysTestCase):
     def test_wrong_method_returns_405(self):
         response = self.client.get('/apps/fimeval-gui/api/upload/')
         self.assertEqual(response.status_code, 405)
+
+    def test_upload_multiple_candidates(self):
+        benchmark = SimpleUploadedFile('benchmark_2024.tif', b'bench data', content_type='image/tiff')
+        candidates = [
+            SimpleUploadedFile('cand_A.tif', b'cand A', content_type='image/tiff'),
+            SimpleUploadedFile('cand_B.tif', b'cand B', content_type='image/tiff'),
+            SimpleUploadedFile('cand_C.tif', b'cand C', content_type='image/tiff'),
+        ]
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': candidates},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(len(body['candidate_keys']), 3)
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        user_id = str(self.user.id)
+        upload_id = body['upload_id']
+        for i, expected in enumerate([b'cand A', b'cand B', b'cand C']):
+            obj = s3.get_object(
+                Bucket=BUCKET, Key=f'fimeval/uploads/{user_id}/{upload_id}/candidate_{i}.tif'
+            )
+            self.assertEqual(obj['Body'].read(), expected)
+
+    def test_s3_failure_returns_503(self):
+        mock_storage = MagicMock()
+        mock_storage.upload_fileobj.side_effect = ClientError(
+            {'Error': {'Code': 'ServiceUnavailable', 'Message': 'Slow Down'}}, 'PutObject'
+        )
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        with patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            response = self.client.post(
+                '/apps/fimeval-gui/api/upload/',
+                {'benchmark': benchmark, 'candidates': [candidate]},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('error', json.loads(response.content))

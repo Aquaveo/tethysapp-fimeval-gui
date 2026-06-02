@@ -1,9 +1,13 @@
+import logging
 import uuid
 
+from botocore.exceptions import BotoCoreError, ClientError
 from django.http import JsonResponse
 from tethys_sdk.routing import controller
 
-from tethysapp.fimeval_gui.app import App  # noqa: E402 — module-level for patch()
+from tethysapp.fimeval_gui.app import App
+
+logger = logging.getLogger(__name__)
 
 
 def _get_storage():
@@ -39,14 +43,20 @@ def api_upload(request):
     user_id = str(request.user.id)
     storage = _get_storage()
 
-    benchmark_key = f'fimeval/uploads/{user_id}/{upload_id}/benchmark.tif'
-    storage.upload_fileobj(benchmark_file, benchmark_key)
+    try:
+        benchmark_key = f'fimeval/uploads/{user_id}/{upload_id}/benchmark.tif'
+        storage.upload_fileobj(benchmark_file, benchmark_key)
 
-    candidate_keys = []
-    for i, cfile in enumerate(candidate_files):
-        key = f'fimeval/uploads/{user_id}/{upload_id}/candidate_{i}.tif'
-        storage.upload_fileobj(cfile, key)
-        candidate_keys.append(key)
+        candidate_keys = []
+        for i, cfile in enumerate(candidate_files):
+            key = f'fimeval/uploads/{user_id}/{upload_id}/candidate_{i}.tif'
+            storage.upload_fileobj(cfile, key)
+            candidate_keys.append(key)
+    except (ClientError, BotoCoreError) as exc:
+        # Partial uploads under this upload_id may remain; a scheduled sweep of
+        # fimeval/uploads/ keys with no corresponding job record handles cleanup.
+        logger.error('S3 upload failed for upload_id=%s: %s', upload_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
 
     return JsonResponse({
         'upload_id': upload_id,
