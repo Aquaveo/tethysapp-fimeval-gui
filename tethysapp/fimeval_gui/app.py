@@ -10,7 +10,8 @@ class App(TethysAppBase):
     root_url = 'fimeval-gui'
     index = 'home'
     catch_all = 'home'
-
+    
+    icon = f'{package}/images/android-chrome-512x512.png'
     description = 'Webapp GUI for the FIMeval flood inundation map evaluation framework'
     color = '#007bff'
     tags = 'FIM, Flood Mapping, Flood Inundation Mapping, Hydrology, Evaluation, GIS'
@@ -51,6 +52,6 @@ class App(TethysAppBase):
                 name='dask_primary',
                 description='Primary Dask scheduler for async FIMeval jobs',
                 engine=SchedulerSetting.DASK,
-                required=True,
+                required=False,
             ),
         )
