@@ -206,7 +206,7 @@ class TestSubmitEndpoint(TethysTestCase):
             data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
             content_type='application/json',
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 202)
         body = json.loads(response.content)
         self.assertEqual(body['job_id'], 99)
         self.assertEqual(body['status'], 'submitted')
@@ -221,7 +221,6 @@ class TestSubmitEndpoint(TethysTestCase):
         self.mock_job.execute.assert_called_once()
 
     def test_submit_rejects_invalid_method(self):
-        self._put_upload('u3')
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
             data=json.dumps({'upload_id': 'u3', 'method': 'bootstrap'}),
@@ -248,3 +247,12 @@ class TestSubmitEndpoint(TethysTestCase):
     def test_submit_wrong_method_returns_405(self):
         response = self.client.get('/apps/fimeval-gui/api/jobs/')
         self.assertEqual(response.status_code, 405)
+
+    def test_submit_requires_login(self):
+        client = self.get_test_client()  # not logged in
+        response = client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            content_type='application/json',
+        )
+        self.assertIn(response.status_code, [302, 403])

@@ -4,11 +4,9 @@ import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
 from django.http import JsonResponse
-from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
 from tethysapp.fimeval_gui.app import App
-from tethysapp.fimeval_gui.job_types import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +89,13 @@ def api_jobs_submit(request):
 
     user_id = str(request.user.id)
     storage = _get_storage()
-    if not storage.list_prefix(f'uploads/{user_id}/{upload_id}/'):
-        return JsonResponse({'error': 'upload_id not found'}, status=404)
+
+    try:
+        if not storage.list_prefix(f'uploads/{user_id}/{upload_id}/'):
+            return JsonResponse({'error': 'upload_id not found'}, status=404)
+    except (ClientError, BotoCoreError) as exc:
+        logger.error('S3 check failed for upload_id=%s: %s', upload_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
 
     s3_config = {
         'endpoint_url': App.get_custom_setting('minio_endpoint_url'),
@@ -105,6 +108,9 @@ def api_jobs_submit(request):
         scheduler = App.get_scheduler('dask_primary')
     except Exception:
         return JsonResponse({'error': 'Dask scheduler not configured'}, status=503)
+
+    from tethys_sdk.jobs import DaskJob
+    from tethysapp.fimeval_gui.job_types import REGISTRY
 
     job_manager = App.get_job_manager()
     job = job_manager.create_job(
@@ -121,7 +127,12 @@ def api_jobs_submit(request):
     job.dask_delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
     )
-    job.save()
-    job.execute()
 
-    return JsonResponse({'job_id': job.id, 'status': 'submitted'})
+    try:
+        job.save()
+        job.execute()
+    except Exception as exc:
+        logger.error('Job submission failed for upload_id=%s: %s', upload_id, exc)
+        return JsonResponse({'error': 'job submission failed'}, status=503)
+
+    return JsonResponse({'job_id': job.id, 'status': 'submitted'}, status=202)
