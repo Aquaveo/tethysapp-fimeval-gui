@@ -2,6 +2,9 @@ import os
 import tempfile
 
 import boto3
+from dask import delayed
+
+from tethysapp.fimeval_gui.job_types.registry import JobType
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
@@ -28,6 +31,8 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         for page in paginator.paginate(Bucket=bucket, Prefix=input_prefix):
             for obj in page.get('Contents', []):
                 filename = obj['Key'].split('/')[-1]
+                if not filename:  # skip S3 directory marker objects
+                    continue
                 client.download_file(bucket, obj['Key'], os.path.join(case_dir, filename))
 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
@@ -44,12 +49,13 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 client.upload_file(full_path, bucket, s3_key)
 
 
-from dask import delayed  # noqa: E402
-from tethysapp.fimeval_gui.job_types.registry import JobType  # noqa: E402
-
-
 class EvaluateFIMJobType(JobType):
     name = 'evaluate_fim'
 
-    def build_delayed(self, upload_id, user_id, method, s3_config):
-        return delayed(run_evaluate_fim_task)(upload_id, user_id, method, s3_config)
+    def build_delayed(self, **params):
+        return delayed(run_evaluate_fim_task)(
+            params['upload_id'],
+            params['user_id'],
+            params['method'],
+            params['s3_config'],
+        )
