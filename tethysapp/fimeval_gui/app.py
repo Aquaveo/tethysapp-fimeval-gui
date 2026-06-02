@@ -1,5 +1,5 @@
 from tethys_sdk.base import TethysAppBase
-from tethys_sdk.app_settings import CustomSetting, SchedulerSetting
+from tethys_sdk.app_settings import CustomSetting
 
 
 class App(TethysAppBase):
@@ -43,15 +43,5 @@ class App(TethysAppBase):
                 type=CustomSetting.TYPE_STRING,
                 description='S3/MinIO bucket name (e.g. fimeval)',
                 required=True,
-            ),
-        )
-
-    def scheduler_settings(self):
-        return (
-            SchedulerSetting(
-                name='dask_primary',
-                description='Primary Dask scheduler for async FIMeval jobs',
-                engine=SchedulerSetting.DASK,
-                required=False,
             ),
         )
