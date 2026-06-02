@@ -18,8 +18,8 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         aws_secret_access_key=s3_config['secret_key'],
     )
     bucket = s3_config['bucket']
-    input_prefix = f'fimeval/uploads/{user_id}/{upload_id}/'
-    output_prefix = f'fimeval/outputs/{user_id}/{upload_id}/'
+    input_prefix = f'uploads/{user_id}/{upload_id}/'
+    output_prefix = f'outputs/{user_id}/{upload_id}/'
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # FIMeval expects: main_dir/<case_study_name>/<raster files>

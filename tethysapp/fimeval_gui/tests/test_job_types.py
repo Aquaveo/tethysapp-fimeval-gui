@@ -44,9 +44,9 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
         s3.put_object(Bucket=BUCKET,
-                      Key='fimeval/uploads/1/abc/benchmark.tif', Body=b'bench')
+                      Key='uploads/1/abc/benchmark.tif', Body=b'bench')
         s3.put_object(Bucket=BUCKET,
-                      Key='fimeval/uploads/1/abc/candidate_0.tif', Body=b'cand')
+                      Key='uploads/1/abc/candidate_0.tif', Body=b'cand')
 
         def fake_eval(main_dir, method, output_dir, **kwargs):
             os.makedirs(output_dir, exist_ok=True)
@@ -64,7 +64,7 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         output_keys = [
             obj['Key']
             for page in s3.get_paginator('list_objects_v2').paginate(
-                Bucket=BUCKET, Prefix='fimeval/outputs/1/abc/'
+                Bucket=BUCKET, Prefix='outputs/1/abc/'
             )
             for obj in page.get('Contents', [])
         ]
@@ -78,8 +78,8 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
     def test_method_convex_hull_passed_to_fimeval(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
-        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/benchmark.tif', Body=b'b')
-        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/candidate_0.tif', Body=b'c')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
 
         def fake_eval(main_dir, method, output_dir, **kwargs):
             os.makedirs(output_dir, exist_ok=True)
@@ -96,8 +96,8 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
     def test_benchmark_file_placed_in_case_study_dir(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
-        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/benchmark.tif', Body=b'b')
-        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/candidate_0.tif', Body=b'c')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
 
         captured = {}
 

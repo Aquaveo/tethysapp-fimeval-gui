@@ -76,7 +76,7 @@ class TestUploadEndpoint(TethysTestCase):
 
         s3 = boto3.client('s3', region_name='us-east-1')
         obj = s3.get_object(
-            Bucket=BUCKET, Key=f'fimeval/uploads/{user_id}/{upload_id}/benchmark.tif'
+            Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/benchmark.tif'
         )
         self.assertEqual(obj['Body'].read(), b'bench data')
 
@@ -94,7 +94,7 @@ class TestUploadEndpoint(TethysTestCase):
 
         s3 = boto3.client('s3', region_name='us-east-1')
         obj = s3.get_object(
-            Bucket=BUCKET, Key=f'fimeval/uploads/{user_id}/{upload_id}/candidate_0.tif'
+            Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/candidate_0.tif'
         )
         self.assertEqual(obj['Body'].read(), b'cand data')
 
@@ -146,7 +146,7 @@ class TestUploadEndpoint(TethysTestCase):
         upload_id = body['upload_id']
         for i, expected in enumerate([b'cand A', b'cand B', b'cand C']):
             obj = s3.get_object(
-                Bucket=BUCKET, Key=f'fimeval/uploads/{user_id}/{upload_id}/candidate_{i}.tif'
+                Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/candidate_{i}.tif'
             )
             self.assertEqual(obj['Body'].read(), expected)
 

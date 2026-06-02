@@ -44,17 +44,17 @@ def api_upload(request):
     storage = _get_storage()
 
     try:
-        benchmark_key = f'fimeval/uploads/{user_id}/{upload_id}/benchmark.tif'
+        benchmark_key = f'uploads/{user_id}/{upload_id}/benchmark.tif'
         storage.upload_fileobj(benchmark_file, benchmark_key)
 
         candidate_keys = []
         for i, cfile in enumerate(candidate_files):
-            key = f'fimeval/uploads/{user_id}/{upload_id}/candidate_{i}.tif'
+            key = f'uploads/{user_id}/{upload_id}/candidate_{i}.tif'
             storage.upload_fileobj(cfile, key)
             candidate_keys.append(key)
     except (ClientError, BotoCoreError) as exc:
         # Partial uploads under this upload_id may remain; a scheduled sweep of
-        # fimeval/uploads/ keys with no corresponding job record handles cleanup.
+        # uploads/ keys with no corresponding job record handles cleanup.
         logger.error('S3 upload failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
 
