@@ -200,3 +200,32 @@ def api_job_status(request, job_id):
                 logger.warning('S3 output check failed for job %s: %s', job_id, exc)
 
     return JsonResponse({'job_id': job.id, 'status': status})
+
+
+@controller(url='api/jobs/{job_id}/outputs', login_required=True, name='api_job_outputs')
+def api_job_outputs(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        job = DaskJob.objects.get(id=job_id, user=request.user)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    props = job.extended_properties or {}
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+
+    if not upload_id or not user_id:
+        return JsonResponse({'error': 'job has no outputs'}, status=404)
+
+    try:
+        keys = _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/')
+    except (ClientError, BotoCoreError) as exc:
+        logger.error('S3 list failed for job %s: %s', job_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    if not keys:
+        return JsonResponse({'error': 'no outputs yet'}, status=404)
+
+    return JsonResponse({'job_id': job.id, 'files': keys})
