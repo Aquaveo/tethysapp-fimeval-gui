@@ -43,6 +43,9 @@ class S3Storage:
     def download_to_path(self, key: str, dest_path: str) -> None:
         self._client.download_file(self._bucket, key, dest_path)
 
+    def get_object(self, key: str) -> dict:
+        return self._client.get_object(Bucket=self._bucket, Key=key)
+
     def presigned_url(self, key: str, expiry_seconds: int = 3600) -> str:
         return self._client.generate_presigned_url(
             'get_object',

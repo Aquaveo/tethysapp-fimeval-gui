@@ -441,3 +441,96 @@ class TestOutputsEndpoint(TethysTestCase):
         client = self.get_test_client()
         response = client.get('/apps/fimeval-gui/api/jobs/55/outputs/')
         self.assertIn(response.status_code, [302, 403])
+
+
+class TestDownloadEndpoint(TethysTestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_test_user(username='frank', password='pw', email='f@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def _make_job(self, upload_id='uid1', user_id='1'):
+        from tethys_sdk.jobs import DaskJob
+        job = MagicMock(spec=DaskJob)
+        job.id = 77
+        job.extended_properties = {'upload_id': upload_id, 'user_id': user_id}
+        return job
+
+    VALID_KEY = 'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv'
+
+    def _get(self, job_id, file_key=None):
+        url = f'/apps/fimeval-gui/api/jobs/{job_id}/download/'
+        if file_key:
+            url += f'?file={file_key}'
+        return self.client.get(url)
+
+    def test_download_streams_file(self):
+        job = self._make_job()
+        mock_body = MagicMock()
+        mock_body.iter_chunks.return_value = iter([b'col1,col2\n', b'0.366,0.915\n'])
+        mock_storage = MagicMock()
+        mock_storage.get_object.return_value = {'Body': mock_body, 'ContentLength': 22}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, self.VALID_KEY)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment', response['Content-Disposition'])
+        self.assertIn('EvaluationMetrics.csv', response['Content-Disposition'])
+        self.assertEqual(b''.join(response.streaming_content), b'col1,col2\n0.366,0.915\n')
+
+    def test_download_rejects_key_outside_prefix(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, 'outputs/99/other-uid/secret.csv')
+        self.assertEqual(response.status_code, 403)
+
+    def test_download_missing_file_param_returns_400(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 400)
+
+    def test_download_unknown_job_returns_404(self):
+        from tethys_sdk.jobs import DaskJob
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.side_effect = DaskJob.DoesNotExist
+            response = self._get(999, self.VALID_KEY)
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_file_not_found_in_s3_returns_404(self):
+        job = self._make_job()
+        mock_storage = MagicMock()
+        mock_storage.get_object.side_effect = ClientError(
+            {'Error': {'Code': '404', 'Message': 'Not Found'}}, 'GetObject'
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, self.VALID_KEY)
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_s3_error_returns_503(self):
+        job = self._make_job()
+        mock_storage = MagicMock()
+        mock_storage.get_object.side_effect = ClientError(
+            {'Error': {'Code': 'ServiceUnavailable', 'Message': 'down'}}, 'GetObject'
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, self.VALID_KEY)
+        self.assertEqual(response.status_code, 503)
+
+    def test_download_wrong_method_returns_405(self):
+        response = self.client.post(f'/apps/fimeval-gui/api/jobs/77/download/')
+        self.assertEqual(response.status_code, 405)
+
+    def test_download_requires_login(self):
+        client = self.get_test_client()
+        response = client.get(f'/apps/fimeval-gui/api/jobs/77/download/?file={self.VALID_KEY}')
+        self.assertIn(response.status_code, [302, 403])

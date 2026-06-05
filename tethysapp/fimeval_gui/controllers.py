@@ -1,10 +1,11 @@
 import json as json_module
 import logging
+import mimetypes
 import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
@@ -229,3 +230,46 @@ def api_job_outputs(request, job_id):
         return JsonResponse({'error': 'no outputs yet'}, status=404)
 
     return JsonResponse({'job_id': job.id, 'files': keys})
+
+
+@controller(url='api/jobs/{job_id}/download', login_required=True, name='api_job_download')
+def api_job_download(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    file_key = request.GET.get('file')
+    if not file_key:
+        return JsonResponse({'error': 'file parameter is required'}, status=400)
+
+    try:
+        job = DaskJob.objects.get(id=job_id, user=request.user)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    props = job.extended_properties or {}
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    if not file_key.startswith(f'outputs/{user_id}/{upload_id}/'):
+        return JsonResponse({'error': 'access denied'}, status=403)
+
+    try:
+        s3_obj = _get_storage().get_object(file_key)
+    except ClientError as exc:
+        if exc.response['Error']['Code'] in ('404', 'NoSuchKey'):
+            return JsonResponse({'error': 'file not found'}, status=404)
+        logger.error('S3 download failed for job %s key %s: %s', job_id, file_key, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+    except BotoCoreError as exc:
+        logger.error('S3 download failed for job %s key %s: %s', job_id, file_key, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    filename = file_key.split('/')[-1]
+    content_type, _ = mimetypes.guess_type(filename)
+    response = StreamingHttpResponse(
+        s3_obj['Body'].iter_chunks(),
+        content_type=content_type or 'application/octet-stream',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    if 'ContentLength' in s3_obj:
+        response['Content-Length'] = s3_obj['ContentLength']
+    return response
