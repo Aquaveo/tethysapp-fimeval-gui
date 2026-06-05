@@ -256,3 +256,117 @@ class TestSubmitEndpoint(TethysTestCase):
             content_type='application/json',
         )
         self.assertIn(response.status_code, [302, 403])
+
+
+class TestStatusEndpoint(TethysTestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_test_user(username='carol', password='pw', email='c@b.com')
+        self.other = self.create_test_user(username='dave', password='pw', email='d@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def _make_job(self, user, key='some-future-key', extended_properties=None):
+        from tethys_sdk.jobs import DaskJob
+        mock_scheduler = MagicMock()
+        mock_scheduler.host = 'tcp://localhost:8786'
+        job = MagicMock(spec=DaskJob)
+        job.id = 42
+        job.key = key
+        job._status = 'SUB'
+        job.scheduler = mock_scheduler
+        job.extended_properties = extended_properties or {}
+        return job
+
+    def _get(self, job_id):
+        return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/')
+
+    def test_status_returns_200_with_dask_running(self):
+        job = self._make_job(self.user)
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['job_id'], 42)
+        self.assertEqual(body['status'], 'running')
+
+    def test_status_returns_complete_when_dask_finished(self):
+        job = self._make_job(self.user)
+        mock_future = MagicMock()
+        mock_future.status = 'finished'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(json.loads(response.content)['status'], 'complete')
+
+    def test_status_falls_back_to_tethys_when_dask_unreachable(self):
+        job = self._make_job(self.user)
+        job._status = 'SUB'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client', side_effect=Exception('unreachable')):
+            MockDJ.objects.get.return_value = job
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'submitted')
+
+    def test_status_returns_complete_when_outputs_exist_in_s3(self):
+        props = {'upload_id': 'uid1', 'user_id': '1'}
+        job = self._make_job(self.user, extended_properties=props)
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = ['outputs/1/uid1/result.csv']
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'complete')
+
+    def test_status_returns_running_when_no_outputs_in_s3(self):
+        props = {'upload_id': 'uid2', 'user_id': '1'}
+        job = self._make_job(self.user, extended_properties=props)
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = []
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'running')
+
+    def test_status_returns_404_for_unknown_job(self):
+        from tethys_sdk.jobs import DaskJob
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.side_effect = DaskJob.DoesNotExist
+            response = self._get(999)
+        self.assertEqual(response.status_code, 404)
+
+    def test_status_wrong_method_returns_405(self):
+        response = self.client.post('/apps/fimeval-gui/api/jobs/42/')
+        self.assertEqual(response.status_code, 405)
+
+    def test_status_requires_login(self):
+        client = self.get_test_client()
+        response = client.get('/apps/fimeval-gui/api/jobs/42/')
+        self.assertIn(response.status_code, [302, 403])

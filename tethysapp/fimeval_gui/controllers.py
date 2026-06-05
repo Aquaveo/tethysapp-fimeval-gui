@@ -3,7 +3,9 @@ import logging
 import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
+from distributed import Client, Future
 from django.http import JsonResponse
+from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
 from tethysapp.fimeval_gui.app import App
@@ -109,7 +111,6 @@ def api_jobs_submit(request):
     except Exception:
         return JsonResponse({'error': 'Dask scheduler not configured'}, status=503)
 
-    from tethys_sdk.jobs import DaskJob
     from tethysapp.fimeval_gui.job_types import REGISTRY
 
     job_manager = App.get_job_manager()
@@ -136,3 +137,66 @@ def api_jobs_submit(request):
         return JsonResponse({'error': 'job submission failed'}, status=503)
 
     return JsonResponse({'job_id': job.id, 'status': 'submitted'}, status=202)
+
+
+_DASK_TO_STATUS = {
+    'pending':   'running',
+    'processing': 'running',
+    'finished':  'complete',
+    'error':     'error',
+    'cancelled': 'error',
+    'lost':      'error',
+}
+
+_TETHYS_TO_STATUS = {
+    'SUB': 'submitted',
+    'RUN': 'running',
+    'COM': 'complete',
+    'ERR': 'error',
+    'ABT': 'error',
+    'VAR': 'running',
+}
+
+
+@controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
+def api_job_status(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        job = DaskJob.objects.get(id=job_id, user=request.user)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    # Try to get live status from the Dask scheduler via the stored future key.
+    status = None
+    if job.key:
+        try:
+            client = Client(job.scheduler.host, timeout='5s')
+            try:
+                dask_status = Future(job.key, client=client).status
+                status = _DASK_TO_STATUS.get(dask_status, 'running')
+            finally:
+                client.close()
+        except Exception as exc:
+            logger.warning('Dask status check failed for job %s: %s', job_id, exc)
+
+    # Fall back to Tethys stored status if Dask is unreachable or key missing.
+    if status is None:
+        status = _TETHYS_TO_STATUS.get(job._status, 'submitted')
+
+    # Dask future records are ephemeral: once the scheduler forgets a completed
+    # future, Future(key) comes back as 'pending'. Cross-check against S3 —
+    # if outputs already landed, the job completed successfully.
+    if status == 'running':
+        props = job.extended_properties or {}
+        upload_id = props.get('upload_id')
+        user_id = props.get('user_id')
+        if upload_id and user_id:
+            try:
+                if _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/'):
+                    status = 'complete'
+            except (ClientError, BotoCoreError) as exc:
+                logger.warning('S3 output check failed for job %s: %s', job_id, exc)
+
+    return JsonResponse({'job_id': job.id, 'status': status})
