@@ -124,13 +124,13 @@ def api_jobs_submit(request):
         'user_id': user_id,
         'method': method,
     }
-    job.dask_delayed = REGISTRY['evaluate_fim'].build_delayed(
+    delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
     )
 
     try:
         job.save()
-        job.execute()
+        job.execute(delayed)
     except Exception as exc:
         logger.error('Job submission failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'job submission failed'}, status=503)
