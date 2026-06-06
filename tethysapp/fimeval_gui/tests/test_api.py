@@ -274,6 +274,9 @@ class TestStatusEndpoint(TethysTestCase):
         job.id = 42
         job.key = key
         job._status = 'SUB'
+        job.user = user
+        job.creation_time = None
+        job.completion_time = None
         job.scheduler = mock_scheduler
         job.extended_properties = extended_properties or {}
         return job
@@ -362,6 +365,15 @@ class TestStatusEndpoint(TethysTestCase):
             response = self._get(999)
         self.assertEqual(response.status_code, 404)
 
+    def test_status_returns_403_for_other_users_job(self):
+        from tethys_sdk.jobs import DaskJob
+        job = self._make_job(self.other)
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.return_value = job
+            response = self._get(42)
+        self.assertEqual(response.status_code, 403)
+
     def test_status_wrong_method_returns_405(self):
         response = self.client.post('/apps/fimeval-gui/api/jobs/42/')
         self.assertEqual(response.status_code, 405)
@@ -376,13 +388,16 @@ class TestOutputsEndpoint(TethysTestCase):
     def setUp(self):
         super().setUp()
         self.user = self.create_test_user(username='eve', password='pw', email='e@b.com')
+        self.other = self.create_test_user(username='oscar', password='pw', email='o@b.com')
         self.client = self.get_test_client()
         self.client.force_login(self.user)
 
-    def _make_job(self, upload_id='uid1', user_id='1'):
+    def _make_job(self, upload_id='uid1', user_id='1', status='COM', user=None):
         from tethys_sdk.jobs import DaskJob
         job = MagicMock(spec=DaskJob)
         job.id = 55
+        job._status = status
+        job.user = user if user is not None else self.user
         job.extended_properties = {'upload_id': upload_id, 'user_id': user_id}
         return job
 
@@ -391,9 +406,9 @@ class TestOutputsEndpoint(TethysTestCase):
 
     def test_outputs_returns_file_list(self):
         job = self._make_job()
-        keys = ['outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv']
+        key = 'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv'
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = keys
+        mock_storage.list_prefix.return_value = [key]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockDJ.objects.get.return_value = job
@@ -401,7 +416,26 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
         self.assertEqual(body['job_id'], 55)
-        self.assertEqual(body['files'], keys)
+        self.assertEqual(len(body['files']), 1)
+        self.assertEqual(body['files'][0]['key'], key)
+        self.assertEqual(body['files'][0]['name'], 'EvaluationMetrics.csv')
+
+    def test_outputs_returns_400_if_job_not_complete(self):
+        job = self._make_job(status='RUN')
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(55)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', json.loads(response.content))
+
+    def test_outputs_returns_403_for_other_users_job(self):
+        from tethys_sdk.jobs import DaskJob
+        job = self._make_job(user=self.other)
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.return_value = job
+            response = self._get(55)
+        self.assertEqual(response.status_code, 403)
 
     def test_outputs_returns_404_when_no_outputs_yet(self):
         job = self._make_job()
@@ -447,13 +481,16 @@ class TestDownloadEndpoint(TethysTestCase):
     def setUp(self):
         super().setUp()
         self.user = self.create_test_user(username='frank', password='pw', email='f@b.com')
+        self.other = self.create_test_user(username='gina', password='pw', email='g@b.com')
         self.client = self.get_test_client()
         self.client.force_login(self.user)
 
-    def _make_job(self, upload_id='uid1', user_id='1'):
+    def _make_job(self, upload_id='uid1', user_id='1', status='COM', user=None):
         from tethys_sdk.jobs import DaskJob
         job = MagicMock(spec=DaskJob)
         job.id = 77
+        job._status = status
+        job.user = user if user is not None else self.user
         job.extended_properties = {'upload_id': upload_id, 'user_id': user_id}
         return job
 
@@ -465,20 +502,18 @@ class TestDownloadEndpoint(TethysTestCase):
             url += f'?file={file_key}'
         return self.client.get(url)
 
-    def test_download_streams_file(self):
+    def test_download_redirects_to_presigned_url(self):
         job = self._make_job()
-        mock_body = MagicMock()
-        mock_body.iter_chunks.return_value = iter([b'col1,col2\n', b'0.366,0.915\n'])
+        presigned = 'http://minio:9000/bucket/key?X-Amz-Signature=abc'
         mock_storage = MagicMock()
-        mock_storage.get_object.return_value = {'Body': mock_body, 'ContentLength': 22}
+        mock_storage.key_exists.return_value = True
+        mock_storage.presigned_url.return_value = presigned
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockDJ.objects.get.return_value = job
             response = self._get(77, self.VALID_KEY)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('attachment', response['Content-Disposition'])
-        self.assertIn('EvaluationMetrics.csv', response['Content-Disposition'])
-        self.assertEqual(b''.join(response.streaming_content), b'col1,col2\n0.366,0.915\n')
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['Location'], presigned)
 
     def test_download_rejects_key_outside_prefix(self):
         job = self._make_job()
@@ -494,6 +529,23 @@ class TestDownloadEndpoint(TethysTestCase):
             response = self._get(77)
         self.assertEqual(response.status_code, 400)
 
+    def test_download_returns_400_if_job_not_complete(self):
+        job = self._make_job(status='RUN')
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, self.VALID_KEY)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', json.loads(response.content))
+
+    def test_download_returns_403_for_other_users_job(self):
+        from tethys_sdk.jobs import DaskJob
+        job = self._make_job(user=self.other)
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.return_value = job
+            response = self._get(77, self.VALID_KEY)
+        self.assertEqual(response.status_code, 403)
+
     def test_download_unknown_job_returns_404(self):
         from tethys_sdk.jobs import DaskJob
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
@@ -505,9 +557,7 @@ class TestDownloadEndpoint(TethysTestCase):
     def test_download_file_not_found_in_s3_returns_404(self):
         job = self._make_job()
         mock_storage = MagicMock()
-        mock_storage.get_object.side_effect = ClientError(
-            {'Error': {'Code': '404', 'Message': 'Not Found'}}, 'GetObject'
-        )
+        mock_storage.key_exists.return_value = False
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockDJ.objects.get.return_value = job
@@ -517,8 +567,8 @@ class TestDownloadEndpoint(TethysTestCase):
     def test_download_s3_error_returns_503(self):
         job = self._make_job()
         mock_storage = MagicMock()
-        mock_storage.get_object.side_effect = ClientError(
-            {'Error': {'Code': 'ServiceUnavailable', 'Message': 'down'}}, 'GetObject'
+        mock_storage.key_exists.side_effect = ClientError(
+            {'Error': {'Code': 'ServiceUnavailable', 'Message': 'down'}}, 'HeadObject'
         )
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
