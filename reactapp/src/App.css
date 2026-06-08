@@ -1,5 +1,125 @@
+/* reactapp/src/App.css */
+
 .app {
   padding: 2rem;
   max-width: 800px;
   margin: 0 auto;
+}
+
+/* ---- Header ---- */
+.app-header {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+.app-header h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  color: var(--color-text);
+}
+.app-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}
+
+/* ---- Stepper ---- */
+.stepper {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+}
+.stepper-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+.stepper-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.stepper-circle.complete {
+  background: var(--color-success);
+  color: #fff;
+}
+.stepper-circle.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+.stepper-circle.pending {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+.stepper-label {
+  font-size: 0.78rem;
+}
+.stepper-label.complete {
+  color: var(--color-success);
+  font-weight: 600;
+}
+.stepper-label.active {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.stepper-label.pending {
+  color: var(--color-text-muted);
+}
+.stepper-line {
+  flex: 1 1 auto;
+  height: 2px;
+  background: var(--color-border);
+  margin: 16px 8px 0;
+}
+.stepper-line.filled {
+  background: var(--color-success);
+}
+
+/* ---- Step content ---- */
+.step-container {
+  margin-top: 1rem;
+}
+.step-placeholder {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+.step-placeholder h2 {
+  margin-top: 0;
+  color: var(--color-text);
+}
+.step-placeholder p {
+  color: var(--color-text-secondary);
+}
+
+/* ---- Temporary dev nav (removed in FE3/FE4/FE5) ---- */
+.dev-nav {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+/* Next buttons use the shared .button-primary class from styles/theme.css.
+   Back is the secondary variant, matched to button-primary's geometry. */
+.btn-back {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.btn-back:hover {
+  background: var(--color-surface-alt);
 }

@@ -36,8 +36,8 @@ Demo target: **Thursday 2026-06-11** (was set when this was written; confirm dat
 
 All 6 frontend tasks are ready to start. Backend API is fully functional.
 
-#### FIMEVAL-FE1 — App Shell + Three-Step Layout
-Replace scaffold placeholder in `App.tsx` with a top-level `step` state (`'upload' | 'running' | 'results'`). Create `Stepper` component + three placeholder step components. Worst case: **1.5 hours**.
+#### FIMEVAL-FE1 — App Shell + Three-Step Layout ✅ Done
+Scaffold replaced with `App.tsx` (`step` state), `Stepper`, and placeholder Upload/Running/Results steps with temporary dev nav. Brand theme added: `theme.ts` (inline-style tokens), `styles/theme.css` (CSS vars + `.button-primary`), Alan Sans font, cyan/green/pale-cyan palette wired into the stepper and cards. Spec at `docs/superpowers/specs/2026-06-08-fimeval-fe1-app-shell-design.md`, plan at `docs/superpowers/plans/2026-06-08-fimeval-fe1-app-shell.md`.
 
 #### FIMEVAL-FE2 — Upload Step UI
 File pickers (1 benchmark, N candidates), method dropdown (`smallest_extent` / `convex_hull`), disabled submit button until valid, inline validation. Worst case: **2 hours**.

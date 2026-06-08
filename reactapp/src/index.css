@@ -1,8 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Alan+Sans:wght@400;500;600;700&display=swap');
+
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'Alan Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--color-bg);
+}
+
+/* Form controls don't inherit font-family by default. */
+button {
+  font-family: inherit;
 }
 
 #root {

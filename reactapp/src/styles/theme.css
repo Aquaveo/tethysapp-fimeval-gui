@@ -1,0 +1,51 @@
+:root {
+  /* ===== Brand ===== */
+  --color-primary: #25C2DF;
+  --color-primary-hover: #27AFC8;
+  --color-primary-active: #289CB2;
+
+  --color-link: #289CB2;
+
+  /* ===== Layout ===== */
+  --color-bg: #F0FAFC;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #E1F4F9;
+  --color-border: #D1EFF6;
+
+  /* ===== Text ===== */
+  --color-text: #152428;
+  --color-text-secondary: #267788;
+  --color-text-muted: #28899D;
+
+  /* ===== Status ===== */
+  --color-success: #265F4E;
+  --color-warning: #FFC107;
+  --color-error: #CC0000;
+
+  /* ===== UI Tokens ===== */
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+
+  --shadow-sm: 0 0.25rem 0.75rem rgba(21, 36, 40, 0.05);
+  --shadow-md: 0 0.5rem 1.25rem rgba(21, 36, 40, 0.08);
+}
+
+.button-primary {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.button-primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.button-primary:active {
+  background: var(--color-primary-active);
+  transform: translateY(0.0625rem);
+}
