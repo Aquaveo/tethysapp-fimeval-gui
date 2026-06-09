@@ -1,18 +1,21 @@
 // reactapp/src/UploadStep.tsx
 import { useState } from 'react';
 import Dropzone from './Dropzone';
+import { uploadFiles, submitJob } from './api';
 import './UploadStep.css';
 
 type Method = 'smallest_extent' | 'convex_hull';
 
 interface UploadStepProps {
-  onNext: () => void;
+  onJobCreated: (jobId: number) => void;
 }
 
-function UploadStep({ onNext }: UploadStepProps) {
+function UploadStep({ onJobCreated }: UploadStepProps) {
   const [benchmark, setBenchmark] = useState<File | null>(null);
   const [candidates, setCandidates] = useState<File[]>([]);
   const [method, setMethod] = useState<Method>('smallest_extent');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const addCandidates = (files: File[]) => {
     setCandidates((prev) => {
@@ -27,6 +30,21 @@ function UploadStep({ onNext }: UploadStepProps) {
   };
 
   const isValid = benchmark !== null && candidates.length > 0;
+
+  const handleSubmit = async () => {
+    if (!benchmark) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { upload_id } = await uploadFiles(benchmark, candidates);
+      const { job_id } = await submitJob(upload_id, method);
+      onJobCreated(job_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="step-placeholder upload-step">
@@ -91,14 +109,27 @@ function UploadStep({ onNext }: UploadStepProps) {
         <option value="convex_hull">Convex hull</option>
       </select>
 
+      {error && (
+        <div className="upload-error" role="alert">
+          {error}
+        </div>
+      )}
+
       <div className="upload-actions">
         <button
           type="button"
           className="button-primary"
-          disabled={!isValid}
-          onClick={onNext}
+          disabled={!isValid || submitting}
+          onClick={handleSubmit}
         >
-          Upload &amp; Run
+          {submitting ? (
+            <>
+              <span className="upload-spinner" aria-hidden="true" />
+              Uploading&hellip;
+            </>
+          ) : (
+            'Upload & Run'
+          )}
         </button>
       </div>
     </div>

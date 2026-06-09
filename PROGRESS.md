@@ -42,8 +42,8 @@ Scaffold replaced with `App.tsx` (`step` state), `Stepper`, and placeholder Uplo
 #### FIMEVAL-FE2 — Upload Step UI ✅ Done
 Reusable `Dropzone` (drag/drop/browse, `.tif`/`.tiff` extension filtering, keyboard-accessible, owns its rejection message) + rewritten `UploadStep`: benchmark + candidate pickers, removable candidate chips with green ✓ accept ticks, red inline reject error, method dropdown, and a validity-gated "Upload & Run" button (calls `onNext` to advance — FE3 swaps in the real upload+submit). Co-located `Dropzone.css` / `UploadStep.css`. Spec at `docs/superpowers/specs/2026-06-08-fimeval-fe2-upload-step-design.md`, plan at `docs/superpowers/plans/2026-06-08-fimeval-fe2-upload-step.md`.
 
-#### FIMEVAL-FE3 — Upload + Submit API Integration
-`getCsrfToken()` cookie helper, chain `POST /api/upload/` → `POST /api/jobs/`, CSRF header, spinner, advance to step 2 on success. Worst case: **3 hours**.
+#### FIMEVAL-FE3 — Upload + Submit API Integration ✅ Done
+Added `GET /api/csrf/` endpoint (`@ensure_csrf_cookie`) + test (61 backend tests pass). New shared `src/api.ts` (`getCsrfToken`/`ensureCsrf`/`uploadFiles`/`submitJob`, absolute `/apps/fimeval-gui/api` paths, `X-CSRFToken`, `credentials:'same-origin'`, error helper surfacing backend `{error}`). `App` seeds CSRF on mount, holds `jobId`, `onJobCreated` advances to Running. `UploadStep` chains upload→submit with in-flight spinner + red error banner. `RunningStep` displays the job id. Spec at `docs/superpowers/specs/2026-06-08-fimeval-fe3-upload-submit-integration-design.md`, plan at `docs/superpowers/plans/2026-06-08-fimeval-fe3-upload-submit-integration.md`.
 
 #### FIMEVAL-FE4 — Running Step + Status Polling
 Poll `GET /api/jobs/{job_id}/` every 3s with `setInterval` in `useEffect`. On `complete` → step 3. On `error` → show message + "Start Over". Worst case: **2 hours**.

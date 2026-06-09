@@ -5,6 +5,7 @@ import uuid
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
 from django.http import HttpResponseRedirect, JsonResponse
+from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
@@ -27,6 +28,15 @@ def _get_storage():
 def home(request):
     """Controller for the app home page (SPA catch-all)."""
     return App.render(request, 'index.html')
+
+
+@controller(url='api/csrf', login_required=False, name='api_csrf')
+@ensure_csrf_cookie
+def api_csrf(request):
+    """Set the csrftoken cookie so the SPA can send X-CSRFToken on POSTs."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    return JsonResponse({'detail': 'CSRF cookie set'})
 
 
 @controller(url='api/upload', login_required=True, name='api_upload')

@@ -584,3 +584,18 @@ class TestDownloadEndpoint(TethysTestCase):
         client = self.get_test_client()
         response = client.get(f'/apps/fimeval-gui/api/jobs/77/download/?file={self.VALID_KEY}')
         self.assertIn(response.status_code, [302, 403])
+
+
+class TestCsrfEndpoint(TethysTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.get_test_client()
+
+    def test_csrf_get_sets_cookie(self):
+        response = self.client.get('/apps/fimeval-gui/api/csrf/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('csrftoken', response.cookies)
+
+    def test_csrf_post_returns_405(self):
+        response = self.client.post('/apps/fimeval-gui/api/csrf/')
+        self.assertEqual(response.status_code, 405)
