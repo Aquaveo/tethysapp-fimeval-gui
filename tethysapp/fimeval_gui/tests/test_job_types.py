@@ -60,6 +60,9 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
 
         mock_eval.assert_called_once()
         self.assertEqual(mock_eval.call_args.args[1], 'smallest_extent')
+        # A target CRS is passed so fimeval reprojects mixed/non-CONUS inputs
+        # instead of bailing with no outputs.
+        self.assertEqual(mock_eval.call_args.kwargs.get('target_crs'), 'EPSG:5070')
 
         output_keys = [
             obj['Key']

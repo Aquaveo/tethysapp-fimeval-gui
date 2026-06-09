@@ -6,6 +6,12 @@ from dask import delayed
 
 from tethysapp.fimeval_gui.job_types.registry import JobType
 
+# CONUS Albers. Passed to fimeval so it reprojects all inputs to a common CRS
+# instead of bailing ("Mixed or non-CONUS CRS detected") when the benchmark and
+# candidate are in different CRSs. Without a target CRS fimeval only
+# auto-reprojects when every input passes its is_within_conus() check.
+TARGET_CRS = 'EPSG:5070'
+
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
     """Dask worker: download inputs from S3, run EvaluateFIM, upload outputs to S3."""
@@ -38,7 +44,7 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
         os.makedirs(output_dir)
-        fimeval.EvaluateFIM(tmpdir, method, output_dir)
+        fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS)
 
         # Upload everything FIMeval wrote to S3
         for root, _, files in os.walk(output_dir):
