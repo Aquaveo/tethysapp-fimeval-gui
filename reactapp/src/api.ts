@@ -72,3 +72,20 @@ export async function submitJob(
   if (!response.ok) return parseError(response);
   return response.json();
 }
+
+export interface JobStatus {
+  job_id: number;
+  status: 'submitted' | 'running' | 'complete' | 'error';
+  created: string | null;
+  completed: string | null;
+  method: string | null;
+  upload_id: string | null;
+}
+
+export async function getJobStatus(jobId: number): Promise<JobStatus> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) return parseError(response);
+  return response.json();
+}

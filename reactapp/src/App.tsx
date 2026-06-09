@@ -1,5 +1,5 @@
 // reactapp/src/App.tsx
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { STEP_ORDER, type Step } from './types';
 import { ensureCsrf } from './api';
 import Stepper from './Stepper';
@@ -17,9 +17,6 @@ function App() {
   }, []);
 
   const index = STEP_ORDER.indexOf(step);
-  const goNext = () => {
-    if (index < STEP_ORDER.length - 1) setStep(STEP_ORDER[index + 1]);
-  };
   const goBack = () => {
     if (index > 0) setStep(STEP_ORDER[index - 1]);
   };
@@ -28,6 +25,12 @@ function App() {
     setJobId(id);
     setStep('running');
   };
+
+  const onComplete = useCallback(() => setStep('results'), []);
+  const onReset = useCallback(() => {
+    setStep('upload');
+    setJobId(null);
+  }, []);
 
   return (
     <div className="app">
@@ -40,8 +43,8 @@ function App() {
 
       <main className="step-container">
         {step === 'upload' && <UploadStep onJobCreated={onJobCreated} />}
-        {step === 'running' && (
-          <RunningStep jobId={jobId} onNext={goNext} onBack={goBack} />
+        {step === 'running' && jobId !== null && (
+          <RunningStep jobId={jobId} onComplete={onComplete} onReset={onReset} />
         )}
         {step === 'results' && <ResultsStep onBack={goBack} />}
       </main>

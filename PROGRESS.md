@@ -58,6 +58,22 @@ Fetch `GET /api/jobs/{job_id}/outputs/` on mount. Render file list with Download
 
 ---
 
+## Known Follow-Ups / Tech Debt (beyond current MVP scope)
+
+Surfaced 2026-06-09 while manually testing FE3/FE4 with real tier data.
+
+### 1. Pipeline target CRS — ✅ addressed (default), UI selector still a follow-up
+`run_evaluate_fim_task` originally called `fimeval.EvaluateFIM(main_dir, method, output_dir)` with **no** `target_crs`. fimeval's `MakeFIMsUniform` (in `fimeval/utilis.py`) auto-reprojects mixed/geographic CRS to `EPSG:5070` **only when every input passes its `is_within_conus(bounds, crs)` check**; otherwise it prints `"Mixed or non-CONUS CRS detected. Please provide a valid target CRS."` and returns without writing anything. If `target_crs` **is** passed, it skips the `is_within_conus` gate and reprojects everything to it.
+- **Symptom seen:** a benchmark in WGS 84 (EPSG:4326) / UTM 18N + a candidate in Conus Albers (EPSG:5070) → fimeval bailed, no outputs. (Files uploaded fine — confirmed valid via `gdalinfo`; not an upload bug. Same pipeline runs for curl and UI uploads.)
+- **Done:** the worker now passes a default `target_crs='EPSG:5070'` (constant `TARGET_CRS` in `job_types/evaluate_fim.py`), so mixed/non-CONUS inputs reproject instead of bailing.
+- **Still a follow-up:** surface the target CRS as a user-selectable option in the Upload UI rather than hardcoding CONUS Albers (matters for non-CONUS study areas).
+
+### 2. "Finished-but-no-outputs" job spins forever in the UI
+When fimeval bails (as in #1) the Dask task returns normally — **no exception**. So the job neither errors (the Tethys job monitor doesn't tick in dev, and nothing raised) nor completes (no outputs land for the status endpoint's MinIO cross-check). The FE4 poll loop therefore polls indefinitely with the spinner up.
+- **Fix direction:** make a no-output run terminal — e.g. the worker raises if `EvaluateFIM`/`MakeFIMsUniform` produced no outputs, and/or the status endpoint treats a finished-future-with-no-outputs (or a poll timeout) as `error` so FE4 can show the failure screen.
+
+---
+
 ## Dev Environment Quick Reference
 
 | Service | Port | Start command |
