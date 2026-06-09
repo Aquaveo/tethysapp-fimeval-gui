@@ -39,8 +39,8 @@ All 6 frontend tasks are ready to start. Backend API is fully functional.
 #### FIMEVAL-FE1 — App Shell + Three-Step Layout ✅ Done
 Scaffold replaced with `App.tsx` (`step` state), `Stepper`, and placeholder Upload/Running/Results steps with temporary dev nav. Brand theme added: `theme.ts` (inline-style tokens), `styles/theme.css` (CSS vars + `.button-primary`), Alan Sans font, cyan/green/pale-cyan palette wired into the stepper and cards. Spec at `docs/superpowers/specs/2026-06-08-fimeval-fe1-app-shell-design.md`, plan at `docs/superpowers/plans/2026-06-08-fimeval-fe1-app-shell.md`.
 
-#### FIMEVAL-FE2 — Upload Step UI
-File pickers (1 benchmark, N candidates), method dropdown (`smallest_extent` / `convex_hull`), disabled submit button until valid, inline validation. Worst case: **2 hours**.
+#### FIMEVAL-FE2 — Upload Step UI ✅ Done
+Reusable `Dropzone` (drag/drop/browse, `.tif`/`.tiff` extension filtering, keyboard-accessible, owns its rejection message) + rewritten `UploadStep`: benchmark + candidate pickers, removable candidate chips with green ✓ accept ticks, red inline reject error, method dropdown, and a validity-gated "Upload & Run" button (calls `onNext` to advance — FE3 swaps in the real upload+submit). Co-located `Dropzone.css` / `UploadStep.css`. Spec at `docs/superpowers/specs/2026-06-08-fimeval-fe2-upload-step-design.md`, plan at `docs/superpowers/plans/2026-06-08-fimeval-fe2-upload-step.md`.
 
 #### FIMEVAL-FE3 — Upload + Submit API Integration
 `getCsrfToken()` cookie helper, chain `POST /api/upload/` → `POST /api/jobs/`, CSRF header, spinner, advance to step 2 on success. Worst case: **3 hours**.

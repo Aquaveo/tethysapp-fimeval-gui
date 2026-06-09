@@ -1,0 +1,48 @@
+/* reactapp/src/Dropzone.css */
+
+.dropzone-wrap {
+  margin-bottom: 1rem;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: 1.25rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dropzone--over {
+  border-color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+.dropzone-arrow {
+  font-size: 1.1rem;
+  color: var(--color-text-secondary);
+  line-height: 1;
+  pointer-events: none;
+}
+.dropzone-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+.dropzone-browse {
+  color: var(--color-link);
+  font-weight: 600;
+}
+.dropzone-input {
+  display: none;
+}
+/* Scoped with .dropzone-wrap so it outweighs the broader
+   `.step-placeholder p` rule in App.css (which would otherwise win). */
+.dropzone-wrap .dropzone-error {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-error);
+  font-weight: 500;
+}
