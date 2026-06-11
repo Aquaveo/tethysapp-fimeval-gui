@@ -51,8 +51,8 @@ Poll `GET /api/jobs/{job_id}/` every 3s with `setInterval` in `useEffect`. On `c
 #### FIMEVAL-FE5 — Results Step (Metrics + Downloads) ✅ Done
 `ResultsStep` loads outputs + parsed metrics on mount: headline CSI/POD/FAR cards, full metrics table, download list (anchor → `/download/` → 303 → presigned URL), "Start New Evaluation" reset. New backend `GET /api/jobs/{id}/metrics/` parses `EvaluationMetrics.csv` server-side (NaN/Inf → null, UTF-8 lenient). Relaxed the outputs/download `_status=='COM'` guard to the outputs-in-MinIO completion signal the status endpoint uses (so it works in dev where the job monitor doesn't tick). App drops `goBack`/`STEP_ORDER`. 69 backend tests. Spec/plan in `docs/superpowers/`.
 
-#### FIMEVAL-FE6 — Production Build + Tethys Serving
-`npm run build` → verify output in `public/frontend/` → end-to-end browser test. Worst case: **1.5 hours**.
+#### FIMEVAL-FE6 — Production Build + Tethys Serving ✅ Done
+`scripts/build_frontend.sh` (executable; `npm ci && npm run build` in `reactapp/`) wired into `install.yml`'s `post:` hook, so a clean `tethys install` builds the SPA into `public/frontend/` (which stays gitignored — built from source at install). Verified end-to-end on the Tethys-served page (`:8000`): bundle assets 200, full Upload → Running → Results flow, downloads, no console errors.
 
 **Total worst-case frontend: ~12.5 hours.**
 

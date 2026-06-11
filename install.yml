@@ -20,3 +20,4 @@ requirements:
     - "dask[distributed]"
 
 post:
+  - scripts/build_frontend.sh
