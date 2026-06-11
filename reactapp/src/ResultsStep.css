@@ -1,0 +1,146 @@
+/* reactapp/src/ResultsStep.css */
+
+.results-step {
+  max-width: 75vw;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.results-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 1.5rem auto 0;
+  border: 3px solid var(--color-surface-alt);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: results-spin 0.8s linear infinite;
+}
+@keyframes results-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.results-loading {
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.results-error {
+  color: var(--color-error);
+  font-weight: 500;
+}
+
+.results-header {
+  text-align: center;
+  margin-bottom: 1.25rem;
+}
+.results-header h2 {
+  margin: 0;
+  color: var(--color-text);
+}
+.results-subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.results-cards {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+.results-card {
+  flex: 1;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0.9rem;
+  text-align: center;
+}
+.results-card-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.results-card-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.results-card-value.is-csi {
+  color: var(--color-primary);
+}
+
+.results-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+.results-panel-title {
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-surface-alt);
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.results-table thead tr {
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+}
+.results-table th,
+.results-table td {
+  padding: 0.4rem 0.9rem;
+  text-align: left;
+}
+.results-table th.num,
+.results-table td.num {
+  text-align: right;
+}
+.results-table tbody tr:nth-child(even) {
+  background: #f7fcfd;
+}
+.results-table td {
+  color: var(--color-text);
+}
+
+.results-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.results-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--color-bg);
+  font-size: 0.82rem;
+}
+.results-file:last-child {
+  border-bottom: none;
+}
+.results-file-name {
+  color: var(--color-text);
+  word-break: break-all;
+}
+.results-download {
+  text-decoration: none;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.8rem;
+  white-space: nowrap;
+}
+
+.results-actions {
+  display: flex;
+  justify-content: center;
+}

@@ -89,3 +89,46 @@ export async function getJobStatus(jobId: number): Promise<JobStatus> {
   if (!response.ok) return parseError(response);
   return response.json();
 }
+
+export interface OutputFile {
+  name: string;
+  key: string;
+}
+
+export interface JobOutputs {
+  job_id: number;
+  files: OutputFile[];
+}
+
+export interface MetricRow {
+  metric: string;
+  values: Record<string, number | null>;
+}
+
+export interface JobMetrics {
+  job_id: number;
+  candidates: string[];
+  metrics: MetricRow[];
+}
+
+export async function getJobOutputs(jobId: number): Promise<JobOutputs> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/outputs/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) return parseError(response);
+  return response.json();
+}
+
+export async function getJobMetrics(jobId: number): Promise<JobMetrics> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/metrics/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) return parseError(response);
+  return response.json();
+}
+
+// Anchor href target. The browser follows the 303 -> presigned MinIO URL as a
+// navigation/download, so no CORS is involved (unlike reading the body in JS).
+export function downloadUrl(jobId: number, key: string): string {
+  return `${API_BASE}/jobs/${jobId}/download/?file=${encodeURIComponent(key)}`;
+}

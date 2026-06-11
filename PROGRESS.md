@@ -48,8 +48,8 @@ Added `GET /api/csrf/` endpoint (`@ensure_csrf_cookie`) + test (61 backend tests
 #### FIMEVAL-FE4 — Running Step + Status Polling
 Poll `GET /api/jobs/{job_id}/` every 3s with `setInterval` in `useEffect`. On `complete` → step 3. On `error` → show message + "Start Over". Worst case: **2 hours**.
 
-#### FIMEVAL-FE5 — Results Step (Metrics + Downloads)
-Fetch `GET /api/jobs/{job_id}/outputs/` on mount. Render file list with Download buttons pointing to `GET /api/jobs/{job_id}/download/?file={key}`. "Start New Evaluation" reset button. Worst case: **2.5 hours**.
+#### FIMEVAL-FE5 — Results Step (Metrics + Downloads) ✅ Done
+`ResultsStep` loads outputs + parsed metrics on mount: headline CSI/POD/FAR cards, full metrics table, download list (anchor → `/download/` → 303 → presigned URL), "Start New Evaluation" reset. New backend `GET /api/jobs/{id}/metrics/` parses `EvaluationMetrics.csv` server-side (NaN/Inf → null, UTF-8 lenient). Relaxed the outputs/download `_status=='COM'` guard to the outputs-in-MinIO completion signal the status endpoint uses (so it works in dev where the job monitor doesn't tick). App drops `goBack`/`STEP_ORDER`. 69 backend tests. Spec/plan in `docs/superpowers/`.
 
 #### FIMEVAL-FE6 — Production Build + Tethys Serving
 `npm run build` → verify output in `public/frontend/` → end-to-end browser test. Worst case: **1.5 hours**.

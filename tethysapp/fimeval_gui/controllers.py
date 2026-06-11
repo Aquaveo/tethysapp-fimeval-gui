@@ -1,5 +1,8 @@
+import csv
+import io
 import json as json_module
 import logging
+import math
 import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -236,9 +239,6 @@ def api_job_outputs(request, job_id):
     if job.user != request.user:
         return JsonResponse({'error': 'access denied'}, status=403)
 
-    if job._status != 'COM':
-        return JsonResponse({'error': 'job is not complete'}, status=400)
-
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
     user_id = props.get('user_id')
@@ -276,9 +276,6 @@ def api_job_download(request, job_id):
     if job.user != request.user:
         return JsonResponse({'error': 'access denied'}, status=403)
 
-    if job._status != 'COM':
-        return JsonResponse({'error': 'job is not complete'}, status=400)
-
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
     user_id = props.get('user_id')
@@ -298,3 +295,57 @@ def api_job_download(request, job_id):
     response = HttpResponseRedirect(storage.presigned_url(file_key))
     response.status_code = 303
     return response
+
+
+@controller(url='api/jobs/{job_id}/metrics', login_required=True, name='api_job_metrics')
+def api_job_metrics(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        job = DaskJob.objects.get(id=job_id)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    if job.user != request.user:
+        return JsonResponse({'error': 'access denied'}, status=403)
+
+    props = job.extended_properties or {}
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    if not upload_id or not user_id:
+        return JsonResponse({'error': 'metrics not available yet'}, status=404)
+
+    storage = _get_storage()
+    try:
+        keys = storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+        metrics_key = next(
+            (k for k in keys if k.split('/')[-1] == 'EvaluationMetrics.csv'), None
+        )
+        if not metrics_key:
+            return JsonResponse({'error': 'metrics not available yet'}, status=404)
+        raw = storage.get_object(metrics_key)['Body'].read().decode('utf-8', errors='replace')
+    except (ClientError, BotoCoreError) as exc:
+        logger.error('S3 metrics fetch failed for job %s: %s', job_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    rows = [r for r in csv.reader(io.StringIO(raw)) if r]
+    if not rows:
+        return JsonResponse({'error': 'metrics not available yet'}, status=404)
+
+    candidates = rows[0][1:]
+    metrics = []
+    for row in rows[1:]:
+        name = row[0]
+        if name.endswith('_values'):
+            name = name[: -len('_values')]
+        values = {}
+        for i, cand in enumerate(candidates):
+            try:
+                v = float(row[i + 1])
+                values[cand] = v if math.isfinite(v) else None
+            except (ValueError, IndexError):
+                values[cand] = None
+        metrics.append({'metric': name, 'values': values})
+
+    return JsonResponse({'job_id': job.id, 'candidates': candidates, 'metrics': metrics})

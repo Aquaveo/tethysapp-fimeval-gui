@@ -1,6 +1,6 @@
 // reactapp/src/App.tsx
 import { useCallback, useEffect, useState } from 'react';
-import { STEP_ORDER, type Step } from './types';
+import type { Step } from './types';
 import { ensureCsrf } from './api';
 import Stepper from './Stepper';
 import UploadStep from './UploadStep';
@@ -15,11 +15,6 @@ function App() {
   useEffect(() => {
     ensureCsrf();
   }, []);
-
-  const index = STEP_ORDER.indexOf(step);
-  const goBack = () => {
-    if (index > 0) setStep(STEP_ORDER[index - 1]);
-  };
 
   const onJobCreated = (id: number) => {
     setJobId(id);
@@ -46,7 +41,9 @@ function App() {
         {step === 'running' && jobId !== null && (
           <RunningStep jobId={jobId} onComplete={onComplete} onReset={onReset} />
         )}
-        {step === 'results' && <ResultsStep onBack={goBack} />}
+        {step === 'results' && jobId !== null && (
+          <ResultsStep jobId={jobId} onReset={onReset} />
+        )}
       </main>
     </div>
   );

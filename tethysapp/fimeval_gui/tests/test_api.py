@@ -420,13 +420,19 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertEqual(body['files'][0]['key'], key)
         self.assertEqual(body['files'][0]['name'], 'EvaluationMetrics.csv')
 
-    def test_outputs_returns_400_if_job_not_complete(self):
+    def test_outputs_returns_files_even_if_status_not_com(self):
+        # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence
+        # in MinIO is the authoritative completion signal.
         job = self._make_job(status='RUN')
-        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+        key = 'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = [key]
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockDJ.objects.get.return_value = job
             response = self._get(55)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('error', json.loads(response.content))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(json.loads(response.content)['files']), 1)
 
     def test_outputs_returns_403_for_other_users_job(self):
         from tethys_sdk.jobs import DaskJob
@@ -529,13 +535,18 @@ class TestDownloadEndpoint(TethysTestCase):
             response = self._get(77)
         self.assertEqual(response.status_code, 400)
 
-    def test_download_returns_400_if_job_not_complete(self):
+    def test_download_redirects_even_if_status_not_com(self):
         job = self._make_job(status='RUN')
-        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+        presigned = 'http://minio:9000/bucket/key?X-Amz-Signature=abc'
+        mock_storage = MagicMock()
+        mock_storage.key_exists.return_value = True
+        mock_storage.presigned_url.return_value = presigned
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockDJ.objects.get.return_value = job
             response = self._get(77, self.VALID_KEY)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('error', json.loads(response.content))
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['Location'], presigned)
 
     def test_download_returns_403_for_other_users_job(self):
         from tethys_sdk.jobs import DaskJob
@@ -599,3 +610,107 @@ class TestCsrfEndpoint(TethysTestCase):
     def test_csrf_post_returns_405(self):
         response = self.client.post('/apps/fimeval-gui/api/csrf/')
         self.assertEqual(response.status_code, 405)
+
+
+class TestMetricsEndpoint(TethysTestCase):
+    CSV = (
+        'Metrics,candidate_0\n'
+        'CSI_values,0.3656507191183279\n'
+        'TP_values,283142.0\n'
+        'FAR_values,0.4182017683549446\n'
+    )
+    KEY = 'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics/EvaluationMetrics.csv'
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_test_user(username='heidi', password='pw', email='h@b.com')
+        self.other = self.create_test_user(username='ivan', password='pw', email='i@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def _make_job(self, upload_id='uid1', user_id='1', user=None):
+        from tethys_sdk.jobs import DaskJob
+        job = MagicMock(spec=DaskJob)
+        job.id = 88
+        job.user = user if user is not None else self.user
+        job.extended_properties = {'upload_id': upload_id, 'user_id': user_id}
+        return job
+
+    def _get(self, job_id):
+        return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/metrics/')
+
+    def test_metrics_parsed(self):
+        import io as _io
+        job = self._make_job()
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = [self.KEY]
+        mock_storage.get_object.return_value = {'Body': _io.BytesIO(self.CSV.encode('utf-8'))}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(88)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['candidates'], ['candidate_0'])
+        csi = next(m for m in body['metrics'] if m['metric'] == 'CSI')
+        self.assertAlmostEqual(csi['values']['candidate_0'], 0.3656507191183279)
+        tp = next(m for m in body['metrics'] if m['metric'] == 'TP')
+        self.assertEqual(tp['values']['candidate_0'], 283142.0)
+
+    def test_metrics_404_when_csv_absent(self):
+        job = self._make_job()
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = [
+            'outputs/1/uid1/case_study/smallest_extent/ContingencyMaps/x.tif'
+        ]
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(88)
+        self.assertEqual(response.status_code, 404)
+
+    def test_metrics_403_for_other_users_job(self):
+        from tethys_sdk.jobs import DaskJob
+        job = self._make_job(user=self.other)
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.return_value = job
+            response = self._get(88)
+        self.assertEqual(response.status_code, 403)
+
+    def test_metrics_wrong_method_returns_405(self):
+        response = self.client.post('/apps/fimeval-gui/api/jobs/88/metrics/')
+        self.assertEqual(response.status_code, 405)
+
+    def test_metrics_requires_login(self):
+        client = self.get_test_client()
+        response = client.get('/apps/fimeval-gui/api/jobs/88/metrics/')
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_metrics_404_for_unknown_job(self):
+        from tethys_sdk.jobs import DaskJob
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.DoesNotExist = DaskJob.DoesNotExist
+            MockDJ.objects.get.side_effect = DaskJob.DoesNotExist
+            response = self._get(999)
+        self.assertEqual(response.status_code, 404)
+
+    def test_metrics_404_when_no_extended_properties(self):
+        job = self._make_job()
+        job.extended_properties = {}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(88)
+        self.assertEqual(response.status_code, 404)
+
+    def test_metrics_503_on_s3_error(self):
+        job = self._make_job()
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.side_effect = ClientError(
+            {'Error': {'Code': 'ServiceUnavailable', 'Message': 'down'}}, 'ListObjectsV2'
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(88)
+        self.assertEqual(response.status_code, 503)
