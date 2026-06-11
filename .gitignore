@@ -76,3 +76,6 @@ Thumbs.db
 
 # Visual brainstorming sessions
 .superpowers/
+
+# Superpowers planning + spec docs (kept locally, not tracked)
+docs/superpowers/
