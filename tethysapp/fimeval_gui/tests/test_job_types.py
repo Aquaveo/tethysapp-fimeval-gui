@@ -93,6 +93,29 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         run_evaluate_fim_task('abc', '1', 'convex_hull', S3_CONFIG)
 
         self.assertEqual(mock_eval.call_args.args[1], 'convex_hull')
+        # Only bootstrap needs sub_method; other methods must not receive it.
+        self.assertNotIn('sub_method', mock_eval.call_args.kwargs)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_bootstrap_passes_sub_method_random(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            os.makedirs(output_dir, exist_ok=True)
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG)
+
+        self.assertEqual(mock_eval.call_args.args[1], 'bootstrap')
+        # EvaluateFIM's sub_method default (None) crashes run_bootstrap; the worker
+        # must pass 'random' so bootstrap runs.
+        self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'random')
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')

@@ -81,7 +81,7 @@ def api_upload(request):
     })
 
 
-VALID_METHODS = {'smallest_extent', 'convex_hull'}
+VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap'}
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')

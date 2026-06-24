@@ -44,7 +44,13 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
         os.makedirs(output_dir)
-        fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS)
+        # EvaluateFIM's sub_method defaults to None and forwards it into
+        # run_bootstrap, which calls sub_method.lower() and crashes. Pass the
+        # library's own documented default ('random') so bootstrap runs; the
+        # other methods ignore sub_method. n_iterations/n_points stay at fimeval
+        # defaults (100/500).
+        extra = {'sub_method': 'random'} if method == 'bootstrap' else {}
+        fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
 
         # Upload everything FIMeval wrote to S3
         for root, _, files in os.walk(output_dir):
