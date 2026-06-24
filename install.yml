@@ -15,6 +15,7 @@ requirements:
     - nodejs
 
   pip:
+    - "fimeval>=0.1.64"
     - boto3
     - "moto[s3]"
     - "dask[distributed]"
