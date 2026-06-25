@@ -4,7 +4,7 @@ import Dropzone from './Dropzone';
 import { uploadFiles, submitJob } from './api';
 import './UploadStep.css';
 
-type Method = 'smallest_extent' | 'convex_hull';
+type Method = 'smallest_extent' | 'convex_hull' | 'bootstrap';
 
 interface UploadStepProps {
   onJobCreated: (jobId: number) => void;
@@ -107,6 +107,7 @@ function UploadStep({ onJobCreated }: UploadStepProps) {
       >
         <option value="smallest_extent">Smallest extent</option>
         <option value="convex_hull">Convex hull</option>
+        <option value="bootstrap">Bootstrap</option>
       </select>
 
       {error && (
