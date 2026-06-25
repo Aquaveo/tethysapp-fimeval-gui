@@ -1,0 +1,14 @@
+.boxplot-block {
+  padding: 0.25rem 0.6rem 0.8rem;
+}
+.boxplot-cand {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0.4rem 0 0.1rem 0.3rem;
+}
+.boxplot-hint {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}

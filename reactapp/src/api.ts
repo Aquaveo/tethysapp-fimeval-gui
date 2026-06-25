@@ -127,6 +127,33 @@ export async function getJobMetrics(jobId: number): Promise<JobMetrics> {
   return response.json();
 }
 
+export interface BoxStat {
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  outliers: number[];
+  n: number;
+}
+
+export interface BootstrapStats {
+  job_id: number;
+  candidates: string[];
+  metrics: string[];
+  stats: Record<string, Record<string, BoxStat>>;
+}
+
+// Resolves only for bootstrap jobs; other methods return 404 (caller treats
+// that as "no distribution to show").
+export async function getBootstrapDistribution(jobId: number): Promise<BootstrapStats> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/bootstrap/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) return parseError(response);
+  return response.json();
+}
+
 // Anchor href target. The browser follows the 303 -> presigned MinIO URL as a
 // navigation/download, so no CORS is involved (unlike reading the body in JS).
 export function downloadUrl(jobId: number, key: string): string {
