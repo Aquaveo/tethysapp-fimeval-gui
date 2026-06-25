@@ -3,6 +3,7 @@ import io
 import json as json_module
 import logging
 import math
+import statistics
 import tempfile
 import uuid
 import zipfile
@@ -400,3 +401,92 @@ def api_job_download_all(request, job_id):
         filename=f'fimeval_results_{method}_{job_id}.zip',
         content_type='application/zip',
     )
+
+
+# Metrics visualized as bootstrap distributions. These match the column headers
+# fimeval writes in Random_Sampling/random_<candidate>.csv.
+BOOTSTRAP_METRICS = ['CSI', 'POD', 'FAR', 'F1', 'MCC', 'Kappa', 'Accuracy']
+
+
+def _box_stats(values):
+    """Tukey box-plot summary for a list of floats: quartiles, whiskers (the
+    extreme values within 1.5*IQR of the box), and outliers beyond them."""
+    data = sorted(values)
+    n = len(data)
+    if n == 0:
+        return None
+    if n == 1:
+        v = data[0]
+        return {'min': v, 'q1': v, 'median': v, 'q3': v, 'max': v, 'outliers': [], 'n': 1}
+    q1, q2, q3 = statistics.quantiles(data, n=4, method='inclusive')
+    iqr = q3 - q1
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    within = [v for v in data if lo <= v <= hi]
+    outliers = [v for v in data if v < lo or v > hi]
+    return {
+        'min': within[0] if within else data[0],
+        'q1': q1,
+        'median': q2,
+        'q3': q3,
+        'max': within[-1] if within else data[-1],
+        'outliers': outliers,
+        'n': n,
+    }
+
+
+@controller(url='api/jobs/{job_id}/bootstrap', login_required=True, name='api_job_bootstrap')
+def api_job_bootstrap(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        job = DaskJob.objects.get(id=job_id)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    if job.user != request.user:
+        return JsonResponse({'error': 'access denied'}, status=403)
+
+    props = job.extended_properties or {}
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    if not upload_id or not user_id:
+        return JsonResponse({'error': 'no bootstrap results'}, status=404)
+
+    storage = _get_storage()
+    try:
+        keys = sorted(
+            k for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+            if '/Random_Sampling/' in k
+            and k.split('/')[-1].startswith('random_')
+            and k.endswith('.csv')
+        )
+        if not keys:
+            return JsonResponse({'error': 'no bootstrap results'}, status=404)
+
+        candidates = []
+        stats = {}
+        for key in keys:
+            name = key.split('/')[-1][len('random_'):-len('.csv')]
+            raw = storage.get_object(key)['Body'].read().decode('utf-8', errors='replace')
+            series = {m: [] for m in BOOTSTRAP_METRICS}
+            for row in csv.DictReader(io.StringIO(raw)):
+                for m in BOOTSTRAP_METRICS:
+                    try:
+                        v = float(row[m])
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                    if math.isfinite(v):
+                        series[m].append(v)
+            candidates.append(name)
+            stats[name] = {m: _box_stats(vals) for m, vals in series.items() if vals}
+    except (ClientError, BotoCoreError) as exc:
+        logger.error('S3 bootstrap fetch failed for job %s: %s', job_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    return JsonResponse({
+        'job_id': job.id,
+        'candidates': candidates,
+        'metrics': BOOTSTRAP_METRICS,
+        'stats': stats,
+    })
