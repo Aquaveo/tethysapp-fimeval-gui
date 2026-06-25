@@ -3,11 +3,13 @@ import io
 import json as json_module
 import logging
 import math
+import tempfile
 import uuid
+import zipfile
 
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, HttpResponseRedirect, JsonResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
@@ -349,3 +351,52 @@ def api_job_metrics(request, job_id):
         metrics.append({'metric': name, 'values': values})
 
     return JsonResponse({'job_id': job.id, 'candidates': candidates, 'metrics': metrics})
+
+
+@controller(url='api/jobs/{job_id}/download-all', login_required=True, name='api_job_download_all')
+def api_job_download_all(request, job_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        job = DaskJob.objects.get(id=job_id)
+    except DaskJob.DoesNotExist:
+        return JsonResponse({'error': 'job not found'}, status=404)
+
+    if job.user != request.user:
+        return JsonResponse({'error': 'access denied'}, status=403)
+
+    props = job.extended_properties or {}
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    method = props.get('method') or 'results'
+    if not upload_id or not user_id:
+        return JsonResponse({'error': 'no outputs yet'}, status=404)
+
+    prefix = f'outputs/{user_id}/{upload_id}/'
+    storage = _get_storage()
+
+    # Stream every output object into a ZIP backed by a temp file (rolled to
+    # disk), so the whole archive is never held in memory. FileResponse closes
+    # and removes the temp file once the response has been fully sent.
+    tmp = tempfile.TemporaryFile()
+    try:
+        keys = [k for k in storage.list_prefix(prefix) if not k.endswith('/')]
+        if not keys:
+            tmp.close()
+            return JsonResponse({'error': 'no outputs yet'}, status=404)
+        with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for key in keys:
+                arcname = key[len(prefix):]
+                zf.writestr(arcname, storage.get_object(key)['Body'].read())
+    except (ClientError, BotoCoreError) as exc:
+        tmp.close()
+        logger.error('S3 zip build failed for job %s: %s', job_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    tmp.seek(0)
+    return FileResponse(
+        tmp, as_attachment=True,
+        filename=f'fimeval_results_{method}_{job_id}.zip',
+        content_type='application/zip',
+    )
