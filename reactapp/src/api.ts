@@ -132,3 +132,7 @@ export async function getJobMetrics(jobId: number): Promise<JobMetrics> {
 export function downloadUrl(jobId: number, key: string): string {
   return `${API_BASE}/jobs/${jobId}/download/?file=${encodeURIComponent(key)}`;
 }
+
+export function downloadAllUrl(jobId: number): string {
+  return `${API_BASE}/jobs/${jobId}/download-all/`;
+}

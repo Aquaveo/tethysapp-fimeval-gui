@@ -1,6 +1,6 @@
 // reactapp/src/ResultsStep.tsx
 import { useEffect, useState } from 'react';
-import { getJobOutputs, getJobMetrics, downloadUrl } from './api';
+import { getJobOutputs, getJobMetrics, downloadUrl, downloadAllUrl } from './api';
 import type { OutputFile, JobMetrics } from './api';
 import './ResultsStep.css';
 
@@ -140,13 +140,22 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
       )}
 
       <div className="results-panel">
-        <div className="results-panel-title">Output files</div>
+        <div className="results-downloadall">
+          <div className="results-downloadall-text">
+            <div className="results-panel-title results-downloadall-title">Download results</div>
+            <span className="results-downloadall-hint">All output files bundled into one ZIP.</span>
+          </div>
+          <a className="button-primary results-download-all" href={downloadAllUrl(jobId)}>
+            Download Results (.zip)
+          </a>
+        </div>
+        <div className="results-panel-title">Individual files</div>
         <ul className="results-files">
           {outputs.map((f) => (
             <li className="results-file" key={f.key}>
               <span className="results-file-name">{f.name}</span>
               <a
-                className="button-primary results-download"
+                className="results-download-link"
                 href={downloadUrl(jobId, f.key)}
                 download
               >
