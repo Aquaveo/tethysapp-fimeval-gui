@@ -1,5 +1,5 @@
 // reactapp/src/ResultsStep.tsx
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getJobOutputs,
   getJobMetrics,
@@ -8,11 +8,9 @@ import {
   downloadAllUrl,
 } from './api';
 import type { OutputFile, JobMetrics, BootstrapStats } from './api';
+import BootstrapBoxPlots from './BootstrapBoxPlots';
+import ErrorBoundary from './ErrorBoundary';
 import './ResultsStep.css';
-
-// Lazy-loaded so ECharts ships in its own chunk, fetched only when a bootstrap
-// job's results are viewed (non-bootstrap runs never download it).
-const BootstrapBoxPlots = lazy(() => import('./BootstrapBoxPlots'));
 
 interface ResultsStepProps {
   jobId: number;
@@ -158,9 +156,15 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
       )}
 
       {bootstrap && bootstrap.candidates.length > 0 && (
-        <Suspense fallback={<div className="results-panel results-panel-title">Loading distribution…</div>}>
+        <ErrorBoundary
+          fallback={
+            <div className="results-panel results-panel-title">
+              Could not render the bootstrap distribution chart.
+            </div>
+          }
+        >
           <BootstrapBoxPlots data={bootstrap} />
-        </Suspense>
+        </ErrorBoundary>
       )}
 
       <div className="results-panel">
