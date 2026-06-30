@@ -67,12 +67,31 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
 
         # Upload everything FIMeval wrote to S3
+        produced = set()
         for root, _, files in os.walk(output_dir):
             for fname in files:
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, output_dir)
                 s3_key = output_prefix + rel_path.replace(os.sep, '/')
                 client.upload_file(full_path, bucket, s3_key)
+                produced.add(fname)
+
+        # Write a terminal marker LAST, so the status endpoint only reports a
+        # terminal state once the full output set is present (no race with
+        # /metrics or /bootstrap). EvaluationMetrics.csv is written only on a
+        # successful evaluation; its absence means fimeval bailed (e.g. a CRS or
+        # footprint-intersection issue) and produced no usable results.
+        succeeded = 'EvaluationMetrics.csv' in produced
+        client.put_object(
+            Bucket=bucket,
+            Key=output_prefix + ('_SUCCESS' if succeeded else '_FAILED'),
+            Body=b'',
+        )
+        if not succeeded:
+            raise RuntimeError(
+                f'fimeval produced no EvaluationMetrics.csv; evaluation failed '
+                f'(method={method}, upload_id={upload_id})'
+            )
 
 
 class EvaluateFIMJobType(JobType):

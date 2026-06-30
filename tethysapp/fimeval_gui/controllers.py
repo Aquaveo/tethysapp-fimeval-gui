@@ -116,6 +116,9 @@ def api_upload(request):
 
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
+# Terminal markers the worker writes last; not user-facing output files.
+JOB_MARKERS = {'_SUCCESS', '_FAILED'}
+
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
 def api_jobs_submit(request):
@@ -242,18 +245,28 @@ def api_job_status(request, job_id):
 
     props = job.extended_properties or {}
 
-    # Dask future records are ephemeral: once the scheduler forgets a completed
-    # future, Future(key) comes back as 'pending'. Cross-check against S3 —
-    # if outputs already landed, the job completed successfully.
-    if status == 'running':
+    # Dask futures are ephemeral: once the scheduler forgets a finished/errored
+    # future, Future(key) comes back 'pending' → 'running'. For that case, fall
+    # back to the terminal marker the worker writes as its final action. _SUCCESS
+    # guarantees the full output set is present (so /metrics and /bootstrap won't
+    # race), and _FAILED makes a no-output run terminal instead of polling forever.
+    # (Live Dask 'finished'/'error' are trusted directly — the worker returns only
+    # on success and raises on failure.)
+    if status in ('running', 'submitted'):
         upload_id = props.get('upload_id')
         user_id = props.get('user_id')
         if upload_id and user_id:
             try:
-                if _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/'):
+                names = {
+                    k.rsplit('/', 1)[-1]
+                    for k in _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/')
+                }
+                if '_FAILED' in names:
+                    status = 'error'
+                elif '_SUCCESS' in names:
                     status = 'complete'
             except (ClientError, BotoCoreError) as exc:
-                logger.warning('S3 output check failed for job %s: %s', job_id, exc)
+                logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
 
     return JsonResponse({
         'job_id': job.id,
@@ -294,7 +307,10 @@ def api_job_outputs(request, job_id):
     if not keys:
         return JsonResponse({'error': 'no outputs yet'}, status=404)
 
-    files = [{'name': k.split('/')[-1], 'key': k} for k in keys]
+    files = [
+        {'name': k.split('/')[-1], 'key': k}
+        for k in keys if k.rsplit('/', 1)[-1] not in JOB_MARKERS
+    ]
     return JsonResponse({'job_id': job.id, 'files': files})
 
 
@@ -418,7 +434,10 @@ def api_job_download_all(request, job_id):
     # and removes the temp file once the response has been fully sent.
     tmp = tempfile.TemporaryFile()
     try:
-        keys = [k for k in storage.list_prefix(prefix) if not k.endswith('/')]
+        keys = [
+            k for k in storage.list_prefix(prefix)
+            if not k.endswith('/') and k.rsplit('/', 1)[-1] not in JOB_MARKERS
+        ]
         if not keys:
             tmp.close()
             return JsonResponse({'error': 'no outputs yet'}, status=404)
