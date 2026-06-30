@@ -3,6 +3,7 @@ import io
 import json as json_module
 import logging
 import math
+import os
 import statistics
 import tempfile
 import uuid
@@ -45,6 +46,10 @@ def api_csrf(request):
     return JsonResponse({'detail': 'CSRF cookie set'})
 
 
+# Components of an ESRI shapefile bundle (only used by the AOI method).
+ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'}
+
+
 @controller(url='api/upload', login_required=True, name='api_upload')
 def api_upload(request):
     if request.method != 'POST':
@@ -52,11 +57,26 @@ def api_upload(request):
 
     benchmark_file = request.FILES.get('benchmark')
     candidate_files = request.FILES.getlist('candidates')
+    boundary_files = request.FILES.getlist('boundary')
 
     if not benchmark_file:
         return JsonResponse({'error': 'benchmark file is required'}, status=400)
     if not candidate_files:
         return JsonResponse({'error': 'at least one candidate file is required'}, status=400)
+
+    # Validate the optional boundary bundle before uploading anything.
+    if boundary_files:
+        exts = {os.path.splitext(f.name)[1].lower() for f in boundary_files}
+        unsupported = exts - ALLOWED_BOUNDARY_EXT
+        if unsupported:
+            return JsonResponse(
+                {'error': f'unsupported boundary file type(s): {sorted(unsupported)}'},
+                status=400,
+            )
+        if '.shp' not in exts:
+            return JsonResponse(
+                {'error': 'shapefile bundle must include a .shp file'}, status=400,
+            )
 
     upload_id = str(uuid.uuid4())
     user_id = str(request.user.id)
@@ -71,6 +91,15 @@ def api_upload(request):
             key = f'uploads/{user_id}/{upload_id}/candidate_{i}.tif'
             storage.upload_fileobj(cfile, key)
             candidate_keys.append(key)
+
+        # Boundary components keep their original basenames so the shapefile
+        # stem stays consistent across .shp/.shx/.dbf/.prj.
+        boundary_keys = []
+        for bfile in boundary_files:
+            name = os.path.basename(bfile.name)
+            key = f'uploads/{user_id}/{upload_id}/boundary/{name}'
+            storage.upload_fileobj(bfile, key)
+            boundary_keys.append(key)
     except (ClientError, BotoCoreError) as exc:
         # Partial uploads under this upload_id may remain; a scheduled sweep of
         # uploads/ keys with no corresponding job record handles cleanup.
@@ -81,10 +110,11 @@ def api_upload(request):
         'upload_id': upload_id,
         'benchmark_key': benchmark_key,
         'candidate_keys': candidate_keys,
+        'boundary_keys': boundary_keys,
     })
 
 
-VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent'}
+VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
@@ -111,6 +141,12 @@ def api_jobs_submit(request):
     try:
         if not storage.list_prefix(f'uploads/{user_id}/{upload_id}/'):
             return JsonResponse({'error': 'upload_id not found'}, status=404)
+        if method == 'AOI':
+            boundary_keys = storage.list_prefix(f'uploads/{user_id}/{upload_id}/boundary/')
+            if not any(k.endswith('.shp') for k in boundary_keys):
+                return JsonResponse(
+                    {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
+                )
     except (ClientError, BotoCoreError) as exc:
         logger.error('S3 check failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)

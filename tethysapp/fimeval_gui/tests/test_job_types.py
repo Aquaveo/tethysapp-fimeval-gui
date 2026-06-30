@@ -93,8 +93,42 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         run_evaluate_fim_task('abc', '1', 'convex_hull', S3_CONFIG)
 
         self.assertEqual(mock_eval.call_args.args[1], 'convex_hull')
-        # Only bootstrap needs sub_method; other methods must not receive it.
+        # Only bootstrap needs sub_method; only AOI needs shapefile_dir. Neither
+        # should reach EvaluateFIM for other methods.
         self.assertNotIn('sub_method', mock_eval.call_args.kwargs)
+        self.assertNotIn('shapefile_dir', mock_eval.call_args.kwargs)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_aoi_routes_boundary_and_passes_shapefile_dir(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        for ext in ('shp', 'shx', 'dbf', 'prj'):
+            s3.put_object(Bucket=BUCKET, Key=f'uploads/1/abc/boundary/aoi.{ext}', Body=b'x')
+
+        captured = {}
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            os.makedirs(output_dir, exist_ok=True)
+            captured['case_files'] = sorted(os.listdir(os.path.join(main_dir, 'case_study')))
+            captured['shapefile_dir'] = kwargs.get('shapefile_dir')
+            captured['shp_exists'] = bool(kwargs.get('shapefile_dir')) and os.path.exists(
+                kwargs['shapefile_dir']
+            )
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'AOI', S3_CONFIG)
+
+        self.assertEqual(mock_eval.call_args.args[1], 'AOI')
+        # Rasters only in case_dir — boundary parts must be routed elsewhere.
+        self.assertEqual(captured['case_files'], ['benchmark.tif', 'candidate_0.tif'])
+        # shapefile_dir points at the downloaded .shp and the file exists.
+        self.assertTrue(captured['shapefile_dir'].endswith('aoi.shp'))
+        self.assertTrue(captured['shp_exists'])
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')

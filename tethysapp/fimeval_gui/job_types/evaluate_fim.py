@@ -32,14 +32,25 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         case_dir = os.path.join(tmpdir, 'case_study')
         os.makedirs(case_dir)
 
-        # Download all input files into the case_study directory
+        # Download inputs. Rasters go into case_dir; an AOI shapefile bundle
+        # (stored under <prefix>boundary/) goes into a separate dir so it isn't
+        # mixed in with the rasters fimeval evaluates. Track the .shp path.
+        boundary_dir = os.path.join(tmpdir, 'boundary')
+        shapefile_path = None
         paginator = client.get_paginator('list_objects_v2')
         for page in paginator.paginate(Bucket=bucket, Prefix=input_prefix):
             for obj in page.get('Contents', []):
-                filename = obj['Key'].split('/')[-1]
-                if not filename:  # skip S3 directory marker objects
+                rel = obj['Key'][len(input_prefix):]
+                if not rel:  # skip S3 directory marker objects
                     continue
-                client.download_file(bucket, obj['Key'], os.path.join(case_dir, filename))
+                if rel.startswith('boundary/'):
+                    os.makedirs(boundary_dir, exist_ok=True)
+                    dest = os.path.join(boundary_dir, os.path.basename(rel))
+                    if rel.endswith('.shp'):
+                        shapefile_path = dest
+                else:
+                    dest = os.path.join(case_dir, os.path.basename(rel))
+                client.download_file(bucket, obj['Key'], dest)
 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
@@ -50,6 +61,9 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # other methods ignore sub_method. n_iterations/n_points stay at fimeval
         # defaults (100/500).
         extra = {'sub_method': 'random'} if method == 'bootstrap' else {}
+        # AOI evaluates against a user-supplied boundary shapefile.
+        if method == 'AOI' and shapefile_path:
+            extra['shapefile_dir'] = shapefile_path
         fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
 
         # Upload everything FIMeval wrote to S3

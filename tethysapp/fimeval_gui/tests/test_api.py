@@ -64,6 +64,58 @@ class TestUploadEndpoint(TethysTestCase):
         self.assertEqual(len(body['candidate_keys']), 1)
         self.assertIn('benchmark.tif', body['benchmark_key'])
 
+    def test_upload_stores_boundary_bundle(self):
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        shp = SimpleUploadedFile('aoi.shp', b'shp', content_type='application/octet-stream')
+        shx = SimpleUploadedFile('aoi.shx', b'shx', content_type='application/octet-stream')
+        dbf = SimpleUploadedFile('aoi.dbf', b'dbf', content_type='application/octet-stream')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': [candidate], 'boundary': [shp, shx, dbf]},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(len(body['boundary_keys']), 3)
+        upload_id = body['upload_id']
+        user_id = str(self.user.id)
+        s3 = boto3.client('s3', region_name='us-east-1')
+        obj = s3.get_object(
+            Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/boundary/aoi.shp'
+        )
+        self.assertEqual(obj['Body'].read(), b'shp')
+
+    def test_upload_no_boundary_returns_empty_list(self):
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': [candidate]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['boundary_keys'], [])
+
+    def test_upload_boundary_rejects_unsupported_ext(self):
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        bad = SimpleUploadedFile('aoi.txt', b'x', content_type='text/plain')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': [candidate], 'boundary': [bad]},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_boundary_requires_shp(self):
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        shx = SimpleUploadedFile('aoi.shx', b'x', content_type='application/octet-stream')
+        dbf = SimpleUploadedFile('aoi.dbf', b'x', content_type='application/octet-stream')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': [candidate], 'boundary': [shx, dbf]},
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_upload_stores_benchmark_in_s3(self):
         benchmark = SimpleUploadedFile('benchmark_2024.tif', b'bench data', content_type='image/tiff')
         candidate = SimpleUploadedFile('candidate_A.tif', b'cand data', content_type='image/tiff')
@@ -247,6 +299,33 @@ class TestSubmitEndpoint(TethysTestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 202)
+
+    def _put_boundary_shp(self, upload_id):
+        user_id = str(self.user.id)
+        boto3.client('s3', region_name='us-east-1').put_object(
+            Bucket=BUCKET,
+            Key=f'uploads/{user_id}/{upload_id}/boundary/aoi.shp',
+            Body=b'shp',
+        )
+
+    def test_submit_accepts_aoi_with_shapefile(self):
+        self._put_upload('u_aoi')
+        self._put_boundary_shp('u_aoi')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u_aoi', 'method': 'AOI'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 202)
+
+    def test_submit_aoi_without_shapefile_returns_400(self):
+        self._put_upload('u_aoi2')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u_aoi2', 'method': 'AOI'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_submit_rejects_missing_upload_id(self):
         response = self.client.post(
