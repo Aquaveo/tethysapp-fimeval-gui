@@ -239,6 +239,15 @@ class TestSubmitEndpoint(TethysTestCase):
         )
         self.assertEqual(response.status_code, 202)
 
+    def test_submit_accepts_intersected_extent(self):
+        self._put_upload('u_int')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': 'u_int', 'method': 'intersected_extent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 202)
+
     def test_submit_rejects_missing_upload_id(self):
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
