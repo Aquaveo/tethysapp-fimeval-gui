@@ -106,6 +106,12 @@
   margin-bottom: 1rem;
 }
 
+.upload-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
 /* Inline button spinner (shown while submitting) */
 .upload-spinner {
   display: inline-block;

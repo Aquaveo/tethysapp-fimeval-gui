@@ -41,10 +41,12 @@ async function parseError(response: Response): Promise<never> {
 export async function uploadFiles(
   benchmark: File,
   candidates: File[],
+  boundary: File[] = [],
 ): Promise<UploadResult> {
   const form = new FormData();
   form.append('benchmark', benchmark);
   candidates.forEach((file) => form.append('candidates', file));
+  boundary.forEach((file) => form.append('boundary', file));
 
   const response = await fetch(`${API_BASE}/upload/`, {
     method: 'POST',

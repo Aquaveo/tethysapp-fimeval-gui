@@ -4,7 +4,15 @@ import Dropzone from './Dropzone';
 import { uploadFiles, submitJob } from './api';
 import './UploadStep.css';
 
-type Method = 'smallest_extent' | 'convex_hull' | 'intersected_extent' | 'bootstrap';
+type Method =
+  | 'smallest_extent'
+  | 'convex_hull'
+  | 'intersected_extent'
+  | 'bootstrap'
+  | 'AOI';
+
+// ESRI shapefile bundle components (AOI boundary upload).
+const SHAPEFILE_EXTS = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'];
 
 interface UploadStepProps {
   onJobCreated: (jobId: number) => void;
@@ -13,6 +21,7 @@ interface UploadStepProps {
 function UploadStep({ onJobCreated }: UploadStepProps) {
   const [benchmark, setBenchmark] = useState<File | null>(null);
   const [candidates, setCandidates] = useState<File[]>([]);
+  const [boundary, setBoundary] = useState<File[]>([]);
   const [method, setMethod] = useState<Method>('smallest_extent');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,14 +38,29 @@ function UploadStep({ onJobCreated }: UploadStepProps) {
     setCandidates((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const isValid = benchmark !== null && candidates.length > 0;
+  const addBoundary = (files: File[]) => {
+    setBoundary((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const fresh = files.filter((f) => !seen.has(`${f.name}:${f.size}`));
+      return [...prev, ...fresh];
+    });
+  };
+
+  const removeBoundary = (index: number) => {
+    setBoundary((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const isAOI = method === 'AOI';
+  const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
+  const isValid =
+    benchmark !== null && candidates.length > 0 && (!isAOI || hasShp);
 
   const handleSubmit = async () => {
     if (!benchmark) return;
     setError(null);
     setSubmitting(true);
     try {
-      const { upload_id } = await uploadFiles(benchmark, candidates);
+      const { upload_id } = await uploadFiles(benchmark, candidates, isAOI ? boundary : []);
       const { job_id } = await submitJob(upload_id, method);
       onJobCreated(job_id);
     } catch (e) {
@@ -109,7 +133,43 @@ function UploadStep({ onJobCreated }: UploadStepProps) {
         <option value="convex_hull">Convex hull</option>
         <option value="intersected_extent">Intersection</option>
         <option value="bootstrap">Bootstrap</option>
+        <option value="AOI">AOI (Area of Interest)</option>
       </select>
+
+      {isAOI && (
+        <>
+          <span className="upload-field-label">AOI shapefile (all parts)</span>
+          <Dropzone
+            label="Drop the shapefile parts (.shp, .shx, .dbf, .prj…)"
+            multiple
+            accept={SHAPEFILE_EXTS}
+            onAccepted={addBoundary}
+          />
+          {boundary.length > 0 && (
+            <div className="upload-chips">
+              {boundary.map((file, i) => (
+                <span className="upload-chip" key={`${file.name}:${file.size}`}>
+                  <span className="upload-tick" aria-hidden="true">&#10003;</span>
+                  {file.name}
+                  <button
+                    type="button"
+                    className="upload-chip-remove"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => removeBoundary(i)}
+                  >
+                    &#10005;
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {!hasShp && (
+            <p className="upload-hint" role="status">
+              Select all parts of the shapefile — a <strong>.shp</strong> file is required.
+            </p>
+          )}
+        </>
+      )}
 
       {error && (
         <div className="upload-error" role="alert">
