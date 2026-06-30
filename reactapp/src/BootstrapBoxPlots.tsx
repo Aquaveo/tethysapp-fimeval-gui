@@ -1,5 +1,7 @@
 // reactapp/src/BootstrapBoxPlots.tsx
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+// Use the ESM build (clean `export default`). The CJS `lib/core` interops to an
+// object under Vite/rolldown, making the element type invalid at render time.
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 import * as echarts from 'echarts/core';
 import { BoxplotChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
