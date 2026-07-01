@@ -66,6 +66,28 @@ def api_csrf(request):
 # Components of an ESRI shapefile bundle (only used by the AOI method).
 ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'}
 
+# Upload acceptance limits.
+RASTER_EXT = {'.tif', '.tiff'}
+MAX_CANDIDATES = 10
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB per file
+
+
+def _validate_upload(f, allowed_exts):
+    """Return an error message if uploaded file *f* is unacceptable, else None.
+
+    Rejects a disallowed extension, an empty (0-byte) file, or one over the
+    per-file size limit. (Lightweight checks only — no deep raster/GeoTIFF
+    inspection; that's a possible future addition.)
+    """
+    ext = os.path.splitext(f.name)[1].lower()
+    if ext not in allowed_exts:
+        return f"'{f.name}': unsupported file type (allowed: {', '.join(sorted(allowed_exts))})"
+    if not f.size:
+        return f"'{f.name}': file is empty"
+    if f.size > MAX_UPLOAD_BYTES:
+        return f"'{f.name}': exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB per-file limit"
+    return None
+
 
 @controller(url='api/upload', login_required=True, name='api_upload')
 def api_upload(request):
@@ -87,17 +109,22 @@ def api_upload(request):
         return JsonResponse({'error': 'benchmark file is required'}, status=400)
     if not candidate_files:
         return JsonResponse({'error': 'at least one candidate file is required'}, status=400)
+    if len(candidate_files) > MAX_CANDIDATES:
+        return JsonResponse(
+            {'error': f'too many candidates (max {MAX_CANDIDATES})'}, status=400,
+        )
 
-    # Validate the optional boundary bundle before uploading anything.
+    # Validate every file (type / non-empty / size) before uploading anything.
+    for f in [benchmark_file, *candidate_files]:
+        err = _validate_upload(f, RASTER_EXT)
+        if err:
+            return JsonResponse({'error': err}, status=400)
     if boundary_files:
-        exts = {os.path.splitext(f.name)[1].lower() for f in boundary_files}
-        unsupported = exts - ALLOWED_BOUNDARY_EXT
-        if unsupported:
-            return JsonResponse(
-                {'error': f'unsupported boundary file type(s): {sorted(unsupported)}'},
-                status=400,
-            )
-        if '.shp' not in exts:
+        for f in boundary_files:
+            err = _validate_upload(f, ALLOWED_BOUNDARY_EXT)
+            if err:
+                return JsonResponse({'error': err}, status=400)
+        if not any(os.path.splitext(f.name)[1].lower() == '.shp' for f in boundary_files):
             return JsonResponse(
                 {'error': 'shapefile bundle must include a .shp file'}, status=400,
             )
