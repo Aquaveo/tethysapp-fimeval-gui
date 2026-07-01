@@ -14,7 +14,25 @@ TARGET_CRS = 'EPSG:5070'
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
-    """Dask worker: download inputs from S3, run EvaluateFIM, upload outputs to S3."""
+    """Dask worker task: run one FIMeval evaluation end-to-end.
+
+    Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
+    into a case-study dir; any AOI shapefile into a separate dir), runs
+    ``fimeval.EvaluateFIM`` for ``method`` — reprojecting to ``TARGET_CRS``, with
+    ``sub_method='random'`` for bootstrap and ``shapefile_dir`` for AOI — uploads
+    all outputs to ``outputs/<user_id>/<upload_id>/``, then writes a terminal
+    ``_SUCCESS`` / ``_FAILED`` marker as its final action.
+
+    Raises ``RuntimeError`` if no ``EvaluationMetrics.csv`` was produced, so the
+    Dask future errors and the job is reported failed rather than hanging.
+
+    Args:
+        upload_id: UUID identifying this job's input/output prefix.
+        user_id: owning user's id (part of the S3 key namespace).
+        method: a fimeval extent method (``smallest_extent``, ``convex_hull``,
+            ``intersected_extent``, ``bootstrap``, ``AOI``).
+        s3_config: ``endpoint_url`` / ``access_key`` / ``secret_key`` / ``bucket``.
+    """
     import fimeval
 
     client = boto3.client(

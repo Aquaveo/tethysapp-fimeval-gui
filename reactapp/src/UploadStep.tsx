@@ -14,6 +14,12 @@ type Method =
 // ESRI shapefile bundle components (AOI boundary upload).
 const SHAPEFILE_EXTS = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'];
 
+// Append only files not already selected (deduped by name + size).
+function mergeUnique(prev: File[], incoming: File[]): File[] {
+  const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+  return [...prev, ...incoming.filter((f) => !seen.has(`${f.name}:${f.size}`))];
+}
+
 interface UploadStepProps {
   onJobCreated: (jobId: number) => void;
 }
@@ -26,29 +32,13 @@ function UploadStep({ onJobCreated }: UploadStepProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const addCandidates = (files: File[]) => {
-    setCandidates((prev) => {
-      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const fresh = files.filter((f) => !seen.has(`${f.name}:${f.size}`));
-      return [...prev, ...fresh];
-    });
-  };
-
-  const removeCandidate = (index: number) => {
+  const addCandidates = (files: File[]) => setCandidates((prev) => mergeUnique(prev, files));
+  const removeCandidate = (index: number) =>
     setCandidates((prev) => prev.filter((_, i) => i !== index));
-  };
 
-  const addBoundary = (files: File[]) => {
-    setBoundary((prev) => {
-      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const fresh = files.filter((f) => !seen.has(`${f.name}:${f.size}`));
-      return [...prev, ...fresh];
-    });
-  };
-
-  const removeBoundary = (index: number) => {
+  const addBoundary = (files: File[]) => setBoundary((prev) => mergeUnique(prev, files));
+  const removeBoundary = (index: number) =>
     setBoundary((prev) => prev.filter((_, i) => i !== index));
-  };
 
   const isAOI = method === 'AOI';
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));

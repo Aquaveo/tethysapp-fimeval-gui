@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_storage():
+    """Build an S3Storage client from the app's MinIO/S3 custom settings."""
     from tethysapp.fimeval_gui.storage import S3Storage
     return S3Storage(
         endpoint_url=App.get_custom_setting('minio_endpoint_url'),
@@ -29,6 +30,22 @@ def _get_storage():
         secret_key=App.get_custom_setting('minio_secret_key'),
         bucket=App.get_custom_setting('s3_bucket'),
     )
+
+
+def _get_owned_job(request, job_id):
+    """Look up a DaskJob by id and confirm the requester owns it.
+
+    Returns ``(job, None)`` on success, or ``(None, response)`` where *response*
+    is the ``JsonResponse`` to return: 404 if no such job exists, 403 if it
+    belongs to another user.
+    """
+    try:
+        job = DaskJob.objects.get(id=job_id)
+    except DaskJob.DoesNotExist:
+        return None, JsonResponse({'error': 'job not found'}, status=404)
+    if job.user != request.user:
+        return None, JsonResponse({'error': 'access denied'}, status=403)
+    return job, None
 
 
 @controller(login_required=False)
@@ -52,6 +69,13 @@ ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', 
 
 @controller(url='api/upload', login_required=True, name='api_upload')
 def api_upload(request):
+    """POST: store the benchmark, candidate(s), and optional AOI shapefile bundle
+    in object storage under a fresh ``upload_id``; returns the id + S3 keys.
+
+    Multipart fields: ``benchmark`` (one file), ``candidates`` (one or more),
+    ``boundary`` (optional shapefile parts, AOI only). 400 on missing benchmark/
+    candidates or an invalid boundary bundle; 503 if storage is unavailable.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -122,6 +146,12 @@ JOB_MARKERS = {'_SUCCESS', '_FAILED'}
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
 def api_jobs_submit(request):
+    """POST ``{upload_id, method}``: submit a FIMeval evaluation as a Dask job.
+
+    Validates the method and that the upload exists (and, for AOI, that a ``.shp``
+    is present), then creates and executes a DaskJob. Returns ``{job_id, status}``
+    (202). 400 on bad input, 404 unknown upload, 503 if storage/scheduler is down.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -215,16 +245,17 @@ _TETHYS_TO_STATUS = {
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
 def api_job_status(request, job_id):
+    """GET: the job's current status (submitted / running / complete / error).
+
+    Prefers the live Dask future; for the ephemeral-future case it falls back to
+    the worker's terminal ``_SUCCESS`` / ``_FAILED`` marker in object storage.
+    """
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     # Try to get live status from the Dask scheduler via the stored future key.
     status = None
@@ -280,16 +311,15 @@ def api_job_status(request, job_id):
 
 @controller(url='api/jobs/{job_id}/outputs', login_required=True, name='api_job_outputs')
 def api_job_outputs(request, job_id):
+    """GET: list the job's output files as ``{name, key}`` (internal
+    ``_SUCCESS`` / ``_FAILED`` markers excluded). 404 if no outputs exist yet.
+    """
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
@@ -316,6 +346,9 @@ def api_job_outputs(request, job_id):
 
 @controller(url='api/jobs/{job_id}/download', login_required=True, name='api_job_download')
 def api_job_download(request, job_id):
+    """GET ``?file=<key>``: 303-redirect to a presigned URL for one output file.
+    The key must fall under the job's own ``outputs/`` prefix, else 403.
+    """
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -323,13 +356,9 @@ def api_job_download(request, job_id):
     if not file_key:
         return JsonResponse({'error': 'file parameter is required'}, status=400)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
@@ -354,16 +383,15 @@ def api_job_download(request, job_id):
 
 @controller(url='api/jobs/{job_id}/metrics', login_required=True, name='api_job_metrics')
 def api_job_metrics(request, job_id):
+    """GET: ``EvaluationMetrics.csv`` parsed to JSON — ``{candidates, metrics:
+    [{metric, values: {candidate: float|null}}]}``. Non-finite values become null.
+    """
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
@@ -408,16 +436,13 @@ def api_job_metrics(request, job_id):
 
 @controller(url='api/jobs/{job_id}/download-all', login_required=True, name='api_job_download_all')
 def api_job_download_all(request, job_id):
+    """GET: stream all of the job's outputs as a single ZIP (markers excluded)."""
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
@@ -491,16 +516,16 @@ def _box_stats(values):
 
 @controller(url='api/jobs/{job_id}/bootstrap', login_required=True, name='api_job_bootstrap')
 def api_job_bootstrap(request, job_id):
+    """GET: bootstrap distribution as box-plot stats per candidate per metric
+    (min/q1/median/q3/max/outliers/n), parsed from the ``Random_Sampling`` CSVs.
+    404 for non-bootstrap jobs (which have no such CSVs).
+    """
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    try:
-        job = DaskJob.objects.get(id=job_id)
-    except DaskJob.DoesNotExist:
-        return JsonResponse({'error': 'job not found'}, status=404)
-
-    if job.user != request.user:
-        return JsonResponse({'error': 'access denied'}, status=403)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
 
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
