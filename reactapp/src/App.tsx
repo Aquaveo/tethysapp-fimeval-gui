@@ -8,44 +8,63 @@ import RunningStep from './RunningStep';
 import ResultsStep from './ResultsStep';
 import './App.css';
 
-function App() {
-  const [step, setStep] = useState<Step>('upload');
-  const [jobId, setJobId] = useState<number | null>(null);
+function AppHeader() {
+  return (
+    <header className="app-header">
+      <h1>FIMeval</h1>
+      <p className="app-subtitle">Flood Inundation Map Evaluation</p>
+    </header>
+  );
+}
 
-  useEffect(() => {
-    ensureCsrf();
-  }, []);
-
-  const onJobCreated = (id: number) => {
-    setJobId(id);
-    setStep('running');
-  };
-
+// The pop-up window view: shows Running → Results for one job (identified by the
+// ?job=<id> URL param). "Start over" returns this window to the upload form.
+function JobWindow({ jobId }: { jobId: number }) {
+  const [step, setStep] = useState<Step>('running');
   const onComplete = useCallback(() => setStep('results'), []);
   const onReset = useCallback(() => {
-    setStep('upload');
-    setJobId(null);
+    window.location.assign(window.location.pathname);
   }, []);
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>FIMeval</h1>
-        <p className="app-subtitle">Flood Inundation Map Evaluation</p>
-      </header>
-
+      <AppHeader />
       <Stepper current={step} />
-
       <main className="step-container">
-        {step === 'upload' && <UploadStep onJobCreated={onJobCreated} />}
-        {step === 'running' && jobId !== null && (
+        {step === 'running' && (
           <RunningStep jobId={jobId} onComplete={onComplete} onReset={onReset} />
         )}
-        {step === 'results' && jobId !== null && (
-          <ResultsStep jobId={jobId} onReset={onReset} />
-        )}
+        {step === 'results' && <ResultsStep jobId={jobId} onReset={onReset} />}
       </main>
     </div>
+  );
+}
+
+// The main window: an upload launcher. Each run opens its results in a pop-up
+// (see UploadStep) and the form resets, ready for another run.
+function MainWindow() {
+  return (
+    <div className="app">
+      <AppHeader />
+      <main className="step-container">
+        <UploadStep />
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  useEffect(() => {
+    ensureCsrf();
+  }, []);
+
+  const jobParam = new URLSearchParams(window.location.search).get('job');
+  const jobId = jobParam !== null ? Number(jobParam) : NaN;
+
+  return Number.isInteger(jobId) && jobId >= 0 ? (
+    <JobWindow jobId={jobId} />
+  ) : (
+    <MainWindow />
   );
 }
 
