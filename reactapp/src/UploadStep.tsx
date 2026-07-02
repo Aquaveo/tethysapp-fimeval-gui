@@ -14,56 +14,76 @@ type Method =
 // ESRI shapefile bundle components (AOI boundary upload).
 const SHAPEFILE_EXTS = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'];
 
-interface UploadStepProps {
-  onJobCreated: (jobId: number) => void;
+// Append only files not already selected (deduped by name + size).
+function mergeUnique(prev: File[], incoming: File[]): File[] {
+  const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+  return [...prev, ...incoming.filter((f) => !seen.has(`${f.name}:${f.size}`))];
 }
 
-function UploadStep({ onJobCreated }: UploadStepProps) {
+function UploadStep() {
   const [benchmark, setBenchmark] = useState<File | null>(null);
   const [candidates, setCandidates] = useState<File[]>([]);
   const [boundary, setBoundary] = useState<File[]>([]);
   const [method, setMethod] = useState<Method>('smallest_extent');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<
+    { jobId: number; url: string; blocked: boolean } | null
+  >(null);
 
-  const addCandidates = (files: File[]) => {
-    setCandidates((prev) => {
-      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const fresh = files.filter((f) => !seen.has(`${f.name}:${f.size}`));
-      return [...prev, ...fresh];
-    });
-  };
-
-  const removeCandidate = (index: number) => {
+  const addCandidates = (files: File[]) => setCandidates((prev) => mergeUnique(prev, files));
+  const removeCandidate = (index: number) =>
     setCandidates((prev) => prev.filter((_, i) => i !== index));
-  };
 
-  const addBoundary = (files: File[]) => {
-    setBoundary((prev) => {
-      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const fresh = files.filter((f) => !seen.has(`${f.name}:${f.size}`));
-      return [...prev, ...fresh];
-    });
-  };
-
-  const removeBoundary = (index: number) => {
+  const addBoundary = (files: File[]) => setBoundary((prev) => mergeUnique(prev, files));
+  const removeBoundary = (index: number) =>
     setBoundary((prev) => prev.filter((_, i) => i !== index));
-  };
 
   const isAOI = method === 'AOI';
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
   const isValid =
     benchmark !== null && candidates.length > 0 && (!isAOI || hasShp);
 
+  const jobViewUrl = (id: number) =>
+    `${window.location.origin}${window.location.pathname}?job=${id}`;
+
+  const resetForm = () => {
+    setBenchmark(null);
+    setCandidates([]);
+    setBoundary([]);
+    setError(null);
+  };
+
   const handleSubmit = async () => {
     if (!benchmark) return;
     setError(null);
+    setLastRun(null);
     setSubmitting(true);
+
+    // Open the results pop-up synchronously, on the click, so the browser
+    // doesn't block it — a pop-up opened after the upload's await would be.
+    const popup = window.open('', '_blank', 'width=950,height=850');
+    if (popup) {
+      popup.document.write(
+        '<title>FIMeval — preparing…</title>' +
+          '<body style="font-family:sans-serif;padding:1.5rem;color:#152428">' +
+          'Preparing your evaluation…</body>',
+      );
+    }
+
     try {
       const { upload_id } = await uploadFiles(benchmark, candidates, isAOI ? boundary : []);
       const { job_id } = await submitJob(upload_id, method);
-      onJobCreated(job_id);
+      const url = jobViewUrl(job_id);
+      if (popup && !popup.closed) {
+        popup.location.href = url;
+        setLastRun({ jobId: job_id, url, blocked: false });
+      } else {
+        setLastRun({ jobId: job_id, url, blocked: true });
+      }
+      resetForm();
     } catch (e) {
+      if (popup && !popup.closed) popup.close();
       setError(e instanceof Error ? e.message : 'Upload failed. Please try again.');
     } finally {
       setSubmitting(false);
@@ -194,6 +214,28 @@ function UploadStep({ onJobCreated }: UploadStepProps) {
           )}
         </button>
       </div>
+
+      {lastRun && (
+        <div className="upload-launched" role="status">
+          {lastRun.blocked ? (
+            <>
+              Your browser blocked the pop-up.{' '}
+              <a href={lastRun.url} target="_blank" rel="noopener noreferrer">
+                Open the results window
+              </a>
+              .
+            </>
+          ) : (
+            <>
+              Run #{lastRun.jobId} started in a new window.{' '}
+              <a href={lastRun.url} target="_blank" rel="noopener noreferrer">
+                Reopen it
+              </a>{' '}
+              if you closed it.
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -116,6 +116,38 @@ class TestUploadEndpoint(TethysTestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_upload_rejects_non_raster_benchmark(self):
+        benchmark = SimpleUploadedFile('benchmark.png', b'data', content_type='image/png')
+        candidate = SimpleUploadedFile('candidate.tif', b'c', content_type='image/tiff')
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': [candidate]},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_rejects_too_many_candidates(self):
+        benchmark = SimpleUploadedFile('benchmark.tif', b'b', content_type='image/tiff')
+        candidates = [
+            SimpleUploadedFile(f'c{i}.tif', b'c', content_type='image/tiff') for i in range(11)
+        ]
+        response = self.client.post(
+            '/apps/fimeval-gui/api/upload/',
+            {'benchmark': benchmark, 'candidates': candidates},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_validate_upload_rules(self):
+        from types import SimpleNamespace
+        from tethysapp.fimeval_gui.controllers import (
+            _validate_upload, RASTER_EXT, MAX_UPLOAD_BYTES,
+        )
+        self.assertIsNone(_validate_upload(SimpleNamespace(name='ok.tif', size=100), RASTER_EXT))
+        self.assertIsNotNone(_validate_upload(SimpleNamespace(name='x.png', size=100), RASTER_EXT))
+        self.assertIsNotNone(_validate_upload(SimpleNamespace(name='empty.tif', size=0), RASTER_EXT))
+        self.assertIsNotNone(
+            _validate_upload(SimpleNamespace(name='big.tif', size=MAX_UPLOAD_BYTES + 1), RASTER_EXT)
+        )
+
     def test_upload_stores_benchmark_in_s3(self):
         benchmark = SimpleUploadedFile('benchmark_2024.tif', b'bench data', content_type='image/tiff')
         candidate = SimpleUploadedFile('candidate_A.tif', b'cand data', content_type='image/tiff')

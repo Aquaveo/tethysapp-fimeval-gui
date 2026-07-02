@@ -21,6 +21,17 @@
   color: var(--color-text-muted);
   font-size: 0.95rem;
 }
+.app-method-badge {
+  display: inline-block;
+  margin-top: 0.6rem;
+  padding: 0.25rem 0.8rem;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
 
 /* ---- Stepper ---- */
 .stepper {
