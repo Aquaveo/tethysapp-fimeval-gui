@@ -70,7 +70,7 @@ ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', 
 # Upload acceptance limits.
 RASTER_EXT = {'.tif', '.tiff'}
 MAX_CANDIDATES = 10
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB per file
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB per file
 
 
 def _validate_upload(f, allowed_exts):
