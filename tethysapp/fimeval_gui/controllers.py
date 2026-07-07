@@ -6,6 +6,7 @@ import math
 import os
 import statistics
 import tempfile
+import time  # [TIMER] profiling — remove later
 import uuid
 import zipfile
 
@@ -133,6 +134,7 @@ def api_upload(request):
     user_id = str(request.user.id)
     storage = _get_storage()
 
+    _t = time.perf_counter()  # [TIMER]
     try:
         benchmark_key = f'uploads/{user_id}/{upload_id}/benchmark.tif'
         storage.upload_fileobj(benchmark_file, benchmark_key)
@@ -157,6 +159,8 @@ def api_upload(request):
         logger.error('S3 upload failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
 
+    print(f"[TIMER] api_upload: staged inputs in {time.perf_counter()-_t:.1f}s "  # [TIMER]
+          f"({len(candidate_files)} candidate(s), {len(boundary_files)} boundary part(s))", flush=True)
     return JsonResponse({
         'upload_id': upload_id,
         'benchmark_key': benchmark_key,
@@ -241,9 +245,11 @@ def api_jobs_submit(request):
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
     )
 
+    _t = time.perf_counter()  # [TIMER]
     try:
         job.save()
         job.execute(delayed)
+        print(f"[TIMER] api_jobs_submit: save+execute = {time.perf_counter()-_t:.2f}s", flush=True)  # [TIMER]
     except Exception as exc:
         logger.error('Job submission failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'job submission failed'}, status=503)
@@ -287,6 +293,7 @@ def api_job_status(request, job_id):
     # Try to get live status from the Dask scheduler via the stored future key.
     status = None
     if job.key:
+        _t = time.perf_counter()  # [TIMER]
         try:
             client = Client(job.scheduler.host, timeout='5s')
             try:
@@ -296,6 +303,7 @@ def api_job_status(request, job_id):
                 client.close()
         except Exception as exc:
             logger.warning('Dask status check failed for job %s: %s', job_id, exc)
+        print(f"[TIMER] api_job_status: Dask Client+Future = {time.perf_counter()-_t:.2f}s", flush=True)  # [TIMER]
 
     # Fall back to Tethys stored status if Dask is unreachable or key missing.
     if status is None:
@@ -315,10 +323,12 @@ def api_job_status(request, job_id):
         user_id = props.get('user_id')
         if upload_id and user_id:
             try:
+                _t = time.perf_counter()  # [TIMER]
                 names = {
                     k.rsplit('/', 1)[-1]
                     for k in _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/')
                 }
+                print(f"[TIMER] api_job_status: marker list_prefix = {time.perf_counter()-_t:.2f}s", flush=True)  # [TIMER]
                 if '_FAILED' in names:
                     status = 'error'
                 elif '_SUCCESS' in names:

@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time  # [TIMER] profiling — remove later
 
 import boto3
 from dask import delayed
@@ -53,6 +54,8 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # Download inputs. Rasters go into case_dir; an AOI shapefile bundle
         # (stored under <prefix>boundary/) goes into a separate dir so it isn't
         # mixed in with the rasters fimeval evaluates. Track the .shp path.
+        _t_total = time.perf_counter()  # [TIMER]
+        _t = time.perf_counter()        # [TIMER]
         boundary_dir = os.path.join(tmpdir, 'boundary')
         shapefile_path = None
         paginator = client.get_paginator('list_objects_v2')
@@ -69,6 +72,7 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 else:
                     dest = os.path.join(case_dir, os.path.basename(rel))
                 client.download_file(bucket, obj['Key'], dest)
+        print(f"[TIMER] worker: download inputs = {time.perf_counter()-_t:.1f}s", flush=True)  # [TIMER]
 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
@@ -82,9 +86,12 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
+        _t = time.perf_counter()  # [TIMER]
         fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
+        print(f"[TIMER] worker: fimeval.EvaluateFIM({method}) = {time.perf_counter()-_t:.1f}s", flush=True)  # [TIMER]
 
         # Upload everything FIMeval wrote to S3
+        _t = time.perf_counter()  # [TIMER]
         produced = set()
         for root, _, files in os.walk(output_dir):
             for fname in files:
@@ -93,6 +100,8 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 s3_key = output_prefix + rel_path.replace(os.sep, '/')
                 client.upload_file(full_path, bucket, s3_key)
                 produced.add(fname)
+        print(f"[TIMER] worker: upload outputs = {time.perf_counter()-_t:.1f}s", flush=True)  # [TIMER]
+        print(f"[TIMER] worker: TOTAL ({method}) = {time.perf_counter()-_t_total:.1f}s", flush=True)  # [TIMER]
 
         # Write a terminal marker LAST, so the status endpoint only reports a
         # terminal state once the full output set is present (no race with
