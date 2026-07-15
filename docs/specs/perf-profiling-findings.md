@@ -38,7 +38,7 @@ To isolate the cause, we ran a set of experiments that peel away one layer at a 
 
 For a single run, download and upload are ~1–2 s each; **~97 % of the wall-clock is inside `fimeval.EvaluateFIM`**.
 
-![Phase breakdown of a single run](docs/specs/img/perf/phase_breakdown.png)
+![Phase breakdown of a single run](img/perf/phase_breakdown.png)
 
 | Method | download | `EvaluateFIM` | upload | total | compute share |
 |---|--:|--:|--:|--:|--:|
@@ -62,7 +62,7 @@ This rules out the status endpoint / per-poll `Client` creation as a cause.
 
 Running the three heavy methods at once (vs. one at a time) roughly **doubled** each job's compute time. Python's Global Interpreter Lock lets only one thread execute Python at a time, so compute-bound jobs in the single worker process **take turns** rather than truly running in parallel.
 
-![Sequential vs concurrent compute time](docs/specs/img/perf/seq_vs_concurrent_time.png)
+![Sequential vs concurrent compute time](img/perf/seq_vs_concurrent_time.png)
 
 | Method | alone | 3-at-once | slowdown |
 |---|--:|--:|--:|
@@ -76,7 +76,7 @@ Running the three heavy methods at once (vs. one at a time) roughly **doubled** 
 
 Measured peak RAM for one job in isolation (`/usr/bin/time -v`):
 
-![Peak memory per single job vs the ceiling](docs/specs/img/perf/peak_memory.png)
+![Peak memory per single job vs the ceiling](img/perf/peak_memory.png)
 
 | Method · data | peak RSS | peak GB |
 |---|--:|--:|
@@ -106,7 +106,7 @@ This pattern repeats across multiple timestamps: a `python3.13` process balloons
 
 The single Dask worker runs all concurrent jobs in **one process / one shared memory space**. So N heavy jobs ≈ N × (3–4.5 GB), and with the web server also buffering a large upload, the total crosses 15.6 GiB at around **3–4 concurrent jobs** – precisely the load that triggered the crash.
 
-![Memory stacks with concurrency](docs/specs/img/perf/memory_vs_concurrency.png)
+![Memory stacks with concurrency](img/perf/memory_vs_concurrency.png)
 
 ### 3.7 Secondary bottleneck — upload staging under load
 
