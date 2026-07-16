@@ -75,11 +75,22 @@ onto the final grid. We measured it on the same data:
 
 ![One-pass conversion: 5.2× faster, and the memory spike disappears](img/perf2/warp_fix_measured.png)
 
+*Reading the chart: the bars measure the conversion step **alone** — proof that
+the conversion itself streams efficiently (~1 GB). The dashed line is the
+**whole pipeline** on the same dataset (~2.9 GB): the gap between bar and line
+is the helper routine loading the giant intermediate into memory. The one-pass
+fix removes that intermediate, so the whole-pipeline peak falls to roughly the
+bar's level.*
+
 | | Today (two steps) | One pass |
 |---|--:|--:|
 | Time per raster | 45.6 s | **8.7 s (5.2× faster)** |
-| Peak memory | ~2.9 GB pipeline spike | **~1 GB** |
+| Memory — conversion step alone (bars) | 1.09 GB | 0.93 GB |
+| Memory — whole pipeline (dashed line) | ~2.9 GB | **~1 GB** (intermediate never exists) |
 | Result | — | identical to 0.003% |
+
+(Whole-job peaks vary by dataset — ~2.9 GB on this data, ~4.5 GB on Tier_2's
+finer evaluation grid; that spread is the "3–4.5 GB per job" range in §2.)
 
 This change lives in the FIMeval library itself (maintained by the FIMeval
 team), so we have proposed it upstream rather than patching it locally. It is
