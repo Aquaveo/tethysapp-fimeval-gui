@@ -135,18 +135,32 @@ out-of-memory events.
 
 ## 6. What's next
 
-1. **Show the queue honestly in the UI** — "Queued → Running (elapsed 0:42) →
-   Complete" instead of a bare spinner (designed and planned; tickets
-   FIMEVAL-BE16–18, FE13).
-2. **The upstream one-pass fix** (§3) — ~5× faster, ~4× less memory, for every
-   FIMeval user everywhere, not just this app.
-3. **Scaling out** — workers are stateless (all data lives in object storage),
-   so more capacity is simply more worker machines pointed at the same
-   scheduler; add per-user quotas for fairness, and a production web server
-   with direct-to-storage uploads for many simultaneous users.
-4. **Cloud-Optimized GeoTIFFs (exploration)** — tiled rasters would let FIMeval
+*Agreed at the FIM team meeting (2026-07-16): manage jobs first — queuing and
+concurrency limits land before further GUI development — while the source code
+is optimized in parallel.*
+
+1. **Concurrency limits made official** *(Nathan Swain)* — the bounded worker
+   pool (§5) becomes the standard Dask configuration so simultaneous jobs can
+   never exhaust the server again.
+2. **Show the queue honestly in the UI, with estimated wait times** *(group)* —
+   "Queued — roughly N minutes → Running (elapsed 0:42) → Complete" instead of
+   a bare spinner (designed and planned; tickets FIMEVAL-BE16–18, FE13, FE19).
+3. **Fair scheduling** *(Reshma Raghavan)* — evaluate Dask job priorities and
+   per-user round-robin so one user submitting many jobs cannot starve
+   everyone else, and light methods never wait behind heavy ones.
+4. **Scaling experiments** *(Reshma Raghavan)* — measure the trade-off between
+   adding workers (cost) and queueing (wait time) to pick a balanced setup for
+   the current machine and for cloud deployment.
+5. **The upstream one-pass fix** (§3) *(Supath Dhital)* — ~5× faster, ~4× less
+   memory, for every FIMeval user everywhere, not just this app. The
+   confusion-matrix computation over the full domain is the other identified
+   hotspot to examine.
+6. **Cloud-Optimized GeoTIFFs (exploration)** — tiled rasters would let FIMeval
    read only the region being evaluated instead of whole files, making memory
    use independent of raster size and enabling browser map previews.
+7. **Client-side computing (long-term)** — running evaluations directly in the
+   user's browser (Pyodide / WebAssembly) would remove server load entirely
+   for smaller jobs; parked until the server-side work above is done.
 
 ---
 
