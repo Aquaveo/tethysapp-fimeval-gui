@@ -135,9 +135,25 @@ This application runs on:
 | Setting | Example | Notes |
 |---------|---------|-------|
 | `minio_endpoint_url` | `http://127.0.0.1:9000/` | Required for MinIO; leave blank for real AWS S3 |
+| `minio_public_endpoint_url` | *(blank)* | Browser-facing MinIO URL for presigned upload/download URLs. Leave blank to reuse `minio_endpoint_url` (correct for local dev); set in production when the browser reaches MinIO at a different host than the server does |
 | `minio_access_key` / `minio_secret_key` | `admin` / `admin123` | Object-storage credentials |
 | `s3_bucket` | `fimeval` | Bucket name (must exist) |
 | `dask_primary` (Scheduler setting) | `tcp://127.0.0.1:8786` | Dask scheduler host — note the `tcp://` scheme, not http |
+
+#### Browser uploads & MinIO CORS
+
+Uploads use **presigned PUT URLs**: the browser sends file bytes directly to
+MinIO instead of streaming them through the web server (this keeps the server's
+memory flat and removes it as an upload bottleneck). A direct browser PUT is a
+cross-origin request, so MinIO must allow CORS from the app origin.
+
+- **Local dev:** nothing to do. MinIO's `cors_allow_origin` defaults to `*`, so
+  the browser PUT works out of the box.
+- **Production / hardened setups:** scope that `*` down to your real origins with
+  [`scripts/setup_minio_cors.sh`](tethysapp/fimeval_gui/scripts/setup_minio_cors.sh).
+  MinIO does **not** support the S3 per-bucket `PutBucketCors` API — CORS is a
+  server-level setting applied via `mc admin config` (the script handles it and
+  restarts the service).
 
 | Service | Port | | Service | Port |
 |---------|------|---|---------|------|
