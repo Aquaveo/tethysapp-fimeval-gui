@@ -21,6 +21,7 @@ BUCKET = 'fimeval-test'
 def _app_settings_side_effect(name):
     return {
         'minio_endpoint_url': None,
+        'minio_public_endpoint_url': None,
         'minio_access_key': 'test',
         'minio_secret_key': 'test',
         's3_bucket': BUCKET,
@@ -277,13 +278,47 @@ class TestSubmitEndpoint(TethysTestCase):
         self.mock_s3.stop()
         super().tearDown()
 
-    def _put_upload(self, upload_id):
+    def _put_benchmark(self, upload_id, body=b'b'):
         user_id = str(self.user.id)
         boto3.client('s3', region_name='us-east-1').put_object(
-            Bucket=BUCKET,
-            Key=f'uploads/{user_id}/{upload_id}/benchmark.tif',
-            Body=b'b',
+            Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/benchmark.tif', Body=body,
         )
+
+    def _put_candidate(self, upload_id, index=0, body=b'c'):
+        user_id = str(self.user.id)
+        boto3.client('s3', region_name='us-east-1').put_object(
+            Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/candidate_{index}.tif', Body=body,
+        )
+
+    def _put_upload(self, upload_id):
+        """Stage a complete upload: a non-empty benchmark and one candidate."""
+        self._put_benchmark(upload_id)
+        self._put_candidate(upload_id)
+
+    def _submit(self, upload_id, method='smallest_extent'):
+        return self.client.post(
+            '/apps/fimeval-gui/api/jobs/',
+            data=json.dumps({'upload_id': upload_id, 'method': method}),
+            content_type='application/json',
+        )
+
+    def test_submit_rejects_missing_benchmark(self):
+        self._put_candidate('u_nob')  # candidate present, benchmark absent
+        self.assertEqual(self._submit('u_nob').status_code, 400)
+
+    def test_submit_rejects_missing_candidate(self):
+        self._put_benchmark('u_noc')  # benchmark present, candidate absent
+        self.assertEqual(self._submit('u_noc').status_code, 400)
+
+    def test_submit_rejects_empty_benchmark(self):
+        self._put_benchmark('u_eb', body=b'')
+        self._put_candidate('u_eb')
+        self.assertEqual(self._submit('u_eb').status_code, 400)
+
+    def test_submit_rejects_empty_candidate(self):
+        self._put_benchmark('u_ec')
+        self._put_candidate('u_ec', body=b'')
+        self.assertEqual(self._submit('u_ec').status_code, 400)
 
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')
@@ -1109,3 +1144,144 @@ class TestBootstrapEndpoint(TethysTestCase):
             MockDJ.objects.get.return_value = job
             response = self._get(92)
         self.assertEqual(response.status_code, 503)
+
+
+class TestPresignEndpoint(TethysTestCase):
+    """POST /api/upload/presign mints presigned PUT URLs so the browser uploads
+    files directly to MinIO; Django never receives the bytes."""
+
+    URL = '/apps/fimeval-gui/api/upload/presign/'
+
+    def setUp(self):
+        super().setUp()
+        self.mock_s3 = mock_aws()
+        self.mock_s3.start()
+        boto3.client('s3', region_name='us-east-1').create_bucket(Bucket=BUCKET)
+
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.mock_app.get_custom_setting.side_effect = _app_settings_side_effect
+
+        self.user = self.create_test_user(username='pam', password='pw', email='p@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        self.mock_s3.stop()
+        super().tearDown()
+
+    def _post(self, manifest):
+        return self.client.post(
+            self.URL, data=json.dumps(manifest), content_type='application/json',
+        )
+
+    def _targets_by_field(self, body):
+        result = {'benchmark': [], 'candidate': [], 'boundary': []}
+        for t in body['targets']:
+            result[t['field']].append(t)
+        return result
+
+    def test_returns_upload_id_and_targets(self):
+        response = self._post({
+            'benchmark': 'benchmark_2024.tif',
+            'candidates': ['candidate_A.tif'],
+        })
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertIn('upload_id', body)
+        by_field = self._targets_by_field(body)
+        self.assertEqual(len(by_field['benchmark']), 1)
+        self.assertEqual(len(by_field['candidate']), 1)
+
+    def test_targets_carry_scoped_keys_and_urls(self):
+        response = self._post({
+            'benchmark': 'b.tif',
+            'candidates': ['c0.tif', 'c1.tif'],
+        })
+        body = json.loads(response.content)
+        upload_id = body['upload_id']
+        user_id = str(self.user.id)
+        prefix = f'uploads/{user_id}/{upload_id}/'
+        by_field = self._targets_by_field(body)
+
+        self.assertEqual(by_field['benchmark'][0]['key'], prefix + 'benchmark.tif')
+        cand_keys = sorted(t['key'] for t in by_field['candidate'])
+        self.assertEqual(cand_keys, [prefix + 'candidate_0.tif', prefix + 'candidate_1.tif'])
+        for t in body['targets']:
+            self.assertIsInstance(t['url'], str)
+            self.assertIn(t['key'], t['url'])
+
+    def test_presign_stores_no_objects(self):
+        """Presigning must not put any bytes in storage — that is the whole point."""
+        self._post({'benchmark': 'b.tif', 'candidates': ['c0.tif']})
+        remaining = boto3.client('s3', region_name='us-east-1').list_objects_v2(
+            Bucket=BUCKET, Prefix='uploads/',
+        )
+        self.assertEqual(remaining.get('KeyCount', 0), 0)
+
+    def test_boundary_targets_included(self):
+        response = self._post({
+            'benchmark': 'b.tif',
+            'candidates': ['c0.tif'],
+            'boundary': ['aoi.shp', 'aoi.dbf', 'aoi.prj'],
+        })
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        by_field = self._targets_by_field(body)
+        names = sorted(t['key'].rsplit('/', 1)[-1] for t in by_field['boundary'])
+        self.assertEqual(names, ['aoi.dbf', 'aoi.prj', 'aoi.shp'])
+        for t in by_field['boundary']:
+            self.assertIn('/boundary/', t['key'])
+
+    def test_rejects_non_raster_benchmark(self):
+        response = self._post({'benchmark': 'notes.txt', 'candidates': ['c0.tif']})
+        self.assertEqual(response.status_code, 400)
+
+    def test_rejects_too_many_candidates(self):
+        response = self._post({
+            'benchmark': 'b.tif',
+            'candidates': [f'c{i}.tif' for i in range(11)],
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_boundary_requires_shp(self):
+        response = self._post({
+            'benchmark': 'b.tif',
+            'candidates': ['c0.tif'],
+            'boundary': ['aoi.dbf', 'aoi.prj'],
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_boundary_rejects_unsupported_ext(self):
+        response = self._post({
+            'benchmark': 'b.tif',
+            'candidates': ['c0.tif'],
+            'boundary': ['aoi.shp', 'aoi.exe'],
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_missing_benchmark_returns_400(self):
+        response = self._post({'candidates': ['c0.tif']})
+        self.assertEqual(response.status_code, 400)
+
+    def test_missing_candidates_returns_400(self):
+        response = self._post({'benchmark': 'b.tif'})
+        self.assertEqual(response.status_code, 400)
+
+    def test_invalid_json_returns_400(self):
+        response = self.client.post(
+            self.URL, data='not json', content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_wrong_method_returns_405(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 405)
+
+    def test_requires_login(self):
+        client = self.get_test_client()
+        response = client.post(
+            self.URL, data=json.dumps({'benchmark': 'b.tif', 'candidates': ['c0.tif']}),
+            content_type='application/json',
+        )
+        self.assertIn(response.status_code, [302, 403])

@@ -27,6 +27,15 @@ class App(TethysAppBase):
                 required=False,
             ),
             CustomSetting(
+                name='minio_public_endpoint_url',
+                type=CustomSetting.TYPE_STRING,
+                description=(
+                    'Browser-facing MinIO/S3 URL used for presigned upload/download URLs. '
+                    'Leave blank to reuse minio_endpoint_url (correct for local dev).'
+                ),
+                required=False,
+            ),
+            CustomSetting(
                 name='minio_access_key',
                 type=CustomSetting.TYPE_STRING,
                 description='MinIO/S3 access key',

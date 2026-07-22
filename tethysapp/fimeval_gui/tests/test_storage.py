@@ -72,6 +72,21 @@ class TestList(unittest.TestCase):
         _make_bucket()
         self.assertEqual(_make_storage().list_prefix('uploads/99/nope/'), [])
 
+    @mock_aws
+    def test_list_prefix_with_sizes_returns_key_size_pairs(self):
+        _make_bucket()
+        storage = _make_storage()
+        storage.upload_bytes(b'abc', 'uploads/1/abc/benchmark.tif')  # 3 bytes
+        storage.upload_bytes(b'', 'uploads/1/abc/candidate_0.tif')   # 0 bytes
+        pairs = dict(storage.list_prefix_with_sizes('uploads/1/abc/'))
+        self.assertEqual(pairs['uploads/1/abc/benchmark.tif'], 3)
+        self.assertEqual(pairs['uploads/1/abc/candidate_0.tif'], 0)
+
+    @mock_aws
+    def test_list_prefix_with_sizes_empty(self):
+        _make_bucket()
+        self.assertEqual(_make_storage().list_prefix_with_sizes('uploads/99/nope/'), [])
+
 
 class TestKeyExists(unittest.TestCase):
     @mock_aws
@@ -110,3 +125,37 @@ class TestPresignedUrl(unittest.TestCase):
         url = storage.presigned_url('outputs/1/abc/EvaluationMetrics.csv')
         self.assertIsInstance(url, str)
         self.assertIn('EvaluationMetrics.csv', url)
+
+
+class TestPresignedPutUrl(unittest.TestCase):
+    @mock_aws
+    def test_presigned_put_url_is_string_containing_key(self):
+        _make_bucket()
+        url = _make_storage().presigned_put_url('uploads/1/abc/benchmark.tif')
+        self.assertIsInstance(url, str)
+        self.assertIn('uploads/1/abc/benchmark.tif', url)
+
+    @mock_aws
+    def test_presigned_put_url_uses_public_endpoint_when_set(self):
+        from tethysapp.fimeval_gui.storage import S3Storage
+        _make_bucket()
+        storage = S3Storage(
+            endpoint_url='http://internal-minio:9000',
+            access_key='test', secret_key='test', bucket=BUCKET,
+            public_endpoint_url='http://minio.example.org:9000',
+        )
+        url = storage.presigned_put_url('uploads/1/abc/benchmark.tif')
+        self.assertIn('minio.example.org:9000', url)
+        self.assertNotIn('internal-minio', url)
+
+    @mock_aws
+    def test_presigned_get_url_uses_public_endpoint_when_set(self):
+        from tethysapp.fimeval_gui.storage import S3Storage
+        _make_bucket()
+        storage = S3Storage(
+            endpoint_url='http://internal-minio:9000',
+            access_key='test', secret_key='test', bucket=BUCKET,
+            public_endpoint_url='http://minio.example.org:9000',
+        )
+        url = storage.presigned_url('outputs/1/abc/EvaluationMetrics.csv')
+        self.assertIn('minio.example.org:9000', url)
