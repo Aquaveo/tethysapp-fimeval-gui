@@ -45,6 +45,14 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
     input_prefix = f'uploads/{user_id}/{upload_id}/'
     output_prefix = f'outputs/{user_id}/{upload_id}/'
 
+    # Signal that a worker has actually picked this job up (vs. queued at the
+    # scheduler): the status endpoint reads this to report 'running' instead of
+    # 'queued'. Best-effort — a failed put must never block the evaluation.
+    try:
+        client.put_object(Bucket=bucket, Key=output_prefix + '_RUNNING', Body=b'')
+    except Exception:
+        pass
+
     with tempfile.TemporaryDirectory() as tmpdir:
         # FIMeval expects: main_dir/<case_study_name>/<raster files>
         case_dir = os.path.join(tmpdir, 'case_study')

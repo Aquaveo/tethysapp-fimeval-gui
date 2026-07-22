@@ -168,7 +168,7 @@ def api_upload(request):
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
 # Terminal markers the worker writes last; not user-facing output files.
-JOB_MARKERS = {'_SUCCESS', '_FAILED'}
+JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING'}
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
@@ -252,7 +252,7 @@ def api_jobs_submit(request):
 
 
 _DASK_TO_STATUS = {
-    'pending':   'running',
+    'pending':   'queued',
     'processing': 'running',
     'finished':  'complete',
     'error':     'error',
@@ -272,7 +272,7 @@ _TETHYS_TO_STATUS = {
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
 def api_job_status(request, job_id):
-    """GET: the job's current status (submitted / running / complete / error).
+    """GET: the job's current status (submitted / queued / running / complete / error).
 
     Prefers the live Dask future; for the ephemeral-future case it falls back to
     the worker's terminal ``_SUCCESS`` / ``_FAILED`` marker in object storage.
@@ -304,13 +304,15 @@ def api_job_status(request, job_id):
     props = job.extended_properties or {}
 
     # Dask futures are ephemeral: once the scheduler forgets a finished/errored
-    # future, Future(key) comes back 'pending' → 'running'. For that case, fall
-    # back to the terminal marker the worker writes as its final action. _SUCCESS
-    # guarantees the full output set is present (so /metrics and /bootstrap won't
-    # race), and _FAILED makes a no-output run terminal instead of polling forever.
-    # (Live Dask 'finished'/'error' are trusted directly — the worker returns only
-    # on success and raises on failure.)
-    if status in ('running', 'submitted'):
+    # future, Future(key) comes back 'pending' → 'queued'. And a live 'pending'
+    # is ambiguous — queued at the scheduler OR executing on a worker. Both
+    # cases resolve via the markers the worker writes: _RUNNING as its first
+    # action, _SUCCESS/_FAILED as its last. _SUCCESS guarantees the full output
+    # set is present (so /metrics and /bootstrap won't race), and _FAILED makes
+    # a no-output run terminal instead of polling forever. (Live Dask
+    # 'finished'/'error' are trusted directly — the worker returns only on
+    # success and raises on failure.)
+    if status in ('running', 'submitted', 'queued'):
         upload_id = props.get('upload_id')
         user_id = props.get('user_id')
         if upload_id and user_id:
@@ -323,6 +325,10 @@ def api_job_status(request, job_id):
                     status = 'error'
                 elif '_SUCCESS' in names:
                     status = 'complete'
+                elif status == 'queued' and names:
+                    # _RUNNING marker — or partial outputs from a pre-marker
+                    # worker — means a worker has picked the job up.
+                    status = 'running'
             except (ClientError, BotoCoreError) as exc:
                 logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
 

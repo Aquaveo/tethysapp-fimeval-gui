@@ -9,8 +9,18 @@ interface RunningStepProps {
   onReset: () => void;
 }
 
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
   const [errored, setErrored] = useState(false);
+  const [phase, setPhase] = useState<'submitted' | 'queued' | 'running'>('submitted');
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +38,18 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
           setErrored(true);
           return;
         }
-        // submitted / running — keep polling
+        if (status.status === 'queued' || status.status === 'running') {
+          setPhase(status.status);
+        }
+        // Elapsed counts from job creation; fall back to first-poll time if
+        // the backend didn't record a creation timestamp.
+        if (status.created) {
+          const created = Date.parse(status.created);
+          if (!Number.isNaN(created)) setStartedAt(created);
+        } else {
+          setStartedAt((prev) => prev ?? Date.now());
+        }
+        // submitted / queued / running — keep polling
         timeout = setTimeout(poll, 3000);
       } catch {
         // transient request failure — tolerate and keep polling
@@ -45,6 +66,13 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
     };
   }, [jobId, onComplete]);
 
+  // 1s tick so the elapsed readout advances between polls.
+  useEffect(() => {
+    if (phase !== 'running') return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [phase]);
+
   if (errored) {
     return (
       <div className="step-placeholder running-step">
@@ -59,11 +87,31 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
     );
   }
 
+  if (phase === 'queued') {
+    return (
+      <div className="step-placeholder running-step">
+        <h2>Queued</h2>
+        <div className="running-queued-dot" aria-hidden="true" />
+        <p className="running-message">Waiting for a worker slot&hellip;</p>
+        <p className="running-hint">
+          Jobs run two at a time so heavy evaluations never exhaust memory.
+        </p>
+        <p className="running-jobid">(Job #{jobId})</p>
+      </div>
+    );
+  }
+
   return (
     <div className="step-placeholder running-step">
       <h2>Running</h2>
       <div className="running-spinner" aria-hidden="true" />
       <p className="running-message">Evaluation in progress&hellip;</p>
+      {phase === 'running' && startedAt !== null && (
+        <p className="running-elapsed">
+          {formatElapsed(now - startedAt)} elapsed — heavy methods typically
+          finish in about a minute
+        </p>
+      )}
       <p className="running-jobid">(Job #{jobId})</p>
     </div>
   );

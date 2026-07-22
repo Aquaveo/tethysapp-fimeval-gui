@@ -28,7 +28,12 @@ export async function ensureCsrf(): Promise<void> {
 }
 
 async function parseError(response: Response): Promise<never> {
-  let message = 'Request failed';
+  // 403 with a non-JSON body is Django's CSRF failure page; anything else
+  // non-JSON keeps a generic message with the status for context.
+  let message =
+    response.status === 403
+      ? 'Session problem (HTTP 403) — please refresh the page and try again'
+      : `Request failed (HTTP ${response.status})`;
   try {
     const body = await response.json();
     if (body && typeof body.error === 'string') message = body.error;
@@ -36,6 +41,14 @@ async function parseError(response: Response): Promise<never> {
     // non-JSON response; keep the generic message
   }
   throw new Error(message);
+}
+
+async function csrfToken(): Promise<string> {
+  // Self-healing: the page-load seeding in ensureCsrf() runs only once, so if
+  // it failed (e.g. the server was down when the tab loaded) every later POST
+  // would 403. Re-seed on demand instead of sending a doomed request.
+  if (!getCsrfToken()) await ensureCsrf();
+  return getCsrfToken();
 }
 
 export async function uploadFiles(
@@ -51,7 +64,7 @@ export async function uploadFiles(
   const response = await fetch(`${API_BASE}/upload/`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'X-CSRFToken': getCsrfToken() },
+    headers: { 'X-CSRFToken': await csrfToken() },
     body: form,
   });
   if (!response.ok) return parseError(response);
@@ -67,7 +80,7 @@ export async function submitJob(
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'X-CSRFToken': getCsrfToken(),
+      'X-CSRFToken': await csrfToken(),
     },
     body: JSON.stringify({ upload_id: uploadId, method }),
   });
@@ -77,7 +90,7 @@ export async function submitJob(
 
 export interface JobStatus {
   job_id: number;
-  status: 'submitted' | 'running' | 'complete' | 'error';
+  status: 'submitted' | 'queued' | 'running' | 'complete' | 'error';
   created: string | null;
   completed: string | null;
   method: string | null;
