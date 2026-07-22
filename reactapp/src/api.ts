@@ -71,6 +71,71 @@ export async function uploadFiles(
   return response.json();
 }
 
+export interface PresignTarget {
+  field: 'benchmark' | 'candidate' | 'boundary';
+  filename: string;
+  key: string;
+  url: string;
+}
+
+export interface PresignResult {
+  upload_id: string;
+  targets: PresignTarget[];
+}
+
+// Ask the server for a fresh upload_id + a presigned PUT URL per file. Only the
+// filenames travel to Django here; the bytes go straight to MinIO via putFile().
+export async function presignUpload(
+  benchmark: File,
+  candidates: File[],
+  boundary: File[] = [],
+): Promise<PresignResult> {
+  const response = await fetch(`${API_BASE}/upload/presign/`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': await csrfToken(),
+    },
+    body: JSON.stringify({
+      benchmark: benchmark.name,
+      candidates: candidates.map((f) => f.name),
+      boundary: boundary.map((f) => f.name),
+    }),
+  });
+  if (!response.ok) return parseError(response);
+  return response.json();
+}
+
+// Upload one file directly to its presigned MinIO URL. Uses XMLHttpRequest (not
+// fetch) because only XHR exposes upload progress events. No CSRF header — this
+// request goes to MinIO, not Django.
+export function putFile(
+  url: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(100);
+        resolve();
+      } else {
+        reject(new Error(`Upload of ${file.name} failed (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error(`Upload of ${file.name} failed (network error)`));
+    xhr.send(file);
+  });
+}
+
 export async function submitJob(
   uploadId: string,
   method: string,

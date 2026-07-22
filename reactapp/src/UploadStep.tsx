@@ -1,8 +1,11 @@
 // reactapp/src/UploadStep.tsx
 import { useState } from 'react';
 import Dropzone from './Dropzone';
-import { uploadFiles, submitJob } from './api';
+import { presignUpload, putFile, submitJob } from './api';
 import './UploadStep.css';
+
+// Per-file upload progress shown while files stream directly to MinIO.
+type FileProgress = { name: string; pct: number; failed: boolean };
 
 type Method =
   | 'smallest_extent'
@@ -27,6 +30,7 @@ function UploadStep() {
   const [method, setMethod] = useState<Method>('smallest_extent');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<FileProgress[] | null>(null);
   const [lastRun, setLastRun] = useState<
     { jobId: number; url: string; blocked: boolean } | null
   >(null);
@@ -52,6 +56,7 @@ function UploadStep() {
     setCandidates([]);
     setBoundary([]);
     setError(null);
+    setProgress(null);
   };
 
   const handleSubmit = async () => {
@@ -72,7 +77,43 @@ function UploadStep() {
     }
 
     try {
-      const { upload_id } = await uploadFiles(benchmark, candidates, isAOI ? boundary : []);
+      const { upload_id, targets } = await presignUpload(
+        benchmark, candidates, isAOI ? boundary : [],
+      );
+
+      // Pair each presigned target with its File (match by field + filename).
+      const pool: { field: string; file: File }[] = [
+        { field: 'benchmark', file: benchmark },
+        ...candidates.map((f) => ({ field: 'candidate', file: f })),
+        ...(isAOI ? boundary : []).map((f) => ({ field: 'boundary', file: f })),
+      ];
+      const used = new Set<number>();
+      const pairs = targets.map((t) => {
+        const i = pool.findIndex(
+          (p, idx) => !used.has(idx) && p.field === t.field && p.file.name === t.filename,
+        );
+        if (i < 0) throw new Error(`No local file matched ${t.filename}`);
+        used.add(i);
+        return { url: t.url, file: pool[i].file };
+      });
+
+      setProgress(pairs.map((p) => ({ name: p.file.name, pct: 0, failed: false })));
+
+      // Upload every file directly to MinIO in parallel; Django is out of the
+      // data path. Any failed PUT rejects the batch and is marked in the UI.
+      await Promise.all(
+        pairs.map((p, idx) =>
+          putFile(p.url, p.file, (pct) =>
+            setProgress((prev) => prev && prev.map((x, i) => (i === idx ? { ...x, pct } : x))),
+          ).catch((err) => {
+            setProgress((prev) =>
+              prev && prev.map((x, i) => (i === idx ? { ...x, failed: true } : x)),
+            );
+            throw err;
+          }),
+        ),
+      );
+
       const { job_id } = await submitJob(upload_id, method);
       const url = jobViewUrl(job_id);
       if (popup && !popup.closed) {
@@ -194,6 +235,25 @@ function UploadStep() {
       {error && (
         <div className="upload-error" role="alert">
           {error}
+        </div>
+      )}
+
+      {progress && (
+        <div className="upload-progress" role="status" aria-live="polite">
+          {progress.map((p, i) => (
+            <div className="upload-progress-row" key={i}>
+              <span className="upload-progress-name" title={p.name}>{p.name}</span>
+              <span className="upload-progress-track">
+                <span
+                  className={`upload-progress-fill${p.failed ? ' failed' : ''}`}
+                  style={{ width: `${p.pct}%` }}
+                />
+              </span>
+              <span className="upload-progress-pct">
+                {p.failed ? 'failed' : p.pct === 100 ? '✓' : `${p.pct}%`}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 
