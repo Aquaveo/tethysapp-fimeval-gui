@@ -116,7 +116,9 @@ This application runs on:
 
   ```bash
   dask scheduler --port 8786
-  dask worker tcp://127.0.0.1:8786 --nworkers 2 --nthreads 1 --memory-limit 6GB
+  # Env-configurable; the defaults reproduce the 2-worker / 6 GB pool.
+  # Size it to your host with docs/specs/worker-sizing-guide.md.
+  ./tethysapp/fimeval_gui/scripts/start_worker.sh
   ```
 
   `--nworkers 2 --nthreads 1` runs each job in its own process (no GIL contention)
