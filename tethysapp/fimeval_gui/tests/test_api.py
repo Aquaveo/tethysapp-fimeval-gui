@@ -21,7 +21,7 @@ BUCKET = 'fimeval-test'
 def _app_settings_side_effect(name):
     return {
         'minio_endpoint_url': None,
-        'minio_public_endpoint_url': None,
+        's3_public_endpoint_url': None,
         'minio_access_key': 'test',
         'minio_secret_key': 'test',
         's3_bucket': BUCKET,

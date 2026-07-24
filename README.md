@@ -141,7 +141,7 @@ This application runs on:
 | Setting | Example | Notes |
 |---------|---------|-------|
 | `minio_endpoint_url` | `http://127.0.0.1:9000/` | Required for MinIO; leave blank for real AWS S3 |
-| `minio_public_endpoint_url` | *(blank)* | Browser-facing MinIO URL for presigned upload/download URLs. Leave blank to reuse `minio_endpoint_url` (correct for local dev); set in production when the browser reaches MinIO at a different host than the server does |
+| `s3_public_endpoint_url` | *(blank)* | Browser-facing object-storage URL for presigned upload/download URLs. Leave blank to reuse the server storage endpoint (correct for local dev); set in production when the browser reaches storage at a different host than the server does |
 | `minio_access_key` / `minio_secret_key` | `admin` / `admin123` | Object-storage credentials |
 | `s3_bucket` | `fimeval` | Bucket name (must exist) |
 | `dask_primary` (Scheduler setting) | `tcp://127.0.0.1:8786` | Dask scheduler host — note the `tcp://` scheme, not http |

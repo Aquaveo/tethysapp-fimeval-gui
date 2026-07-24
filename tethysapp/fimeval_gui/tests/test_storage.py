@@ -2,9 +2,21 @@ import io
 import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 
 import boto3
 from moto import mock_aws
+
+
+@contextmanager
+def _no_region_env():
+    """Drop ambient AWS region env vars, mimicking the real app process where no
+    region is set — the condition under which botocore falls back to SigV2."""
+    saved = {k: os.environ.pop(k) for k in ('AWS_DEFAULT_REGION', 'AWS_REGION') if k in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
 
 os.environ.setdefault('AWS_ACCESS_KEY_ID', 'test')
 os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
@@ -159,3 +171,20 @@ class TestPresignedPutUrl(unittest.TestCase):
         )
         url = storage.presigned_url('outputs/1/abc/EvaluationMetrics.csv')
         self.assertIn('minio.example.org:9000', url)
+
+
+class TestPresignSignatureVersion(unittest.TestCase):
+    def test_presigned_put_url_is_sigv4_even_without_ambient_region(self):
+        # Regression: with no ambient region (the real app process), botocore
+        # defaulted to SigV2, which folds Content-Type into the signature. A
+        # browser PUT always sends Content-Type, so the signature never matched
+        # -> 403. The presign client must be pinned to SigV4 regardless of env.
+        from tethysapp.fimeval_gui.storage import S3Storage
+        with _no_region_env():
+            storage = S3Storage(
+                endpoint_url='http://localhost:9000',
+                access_key='k', secret_key='s', bucket='b',
+            )
+            url = storage.presigned_put_url('uploads/1/abc/benchmark.tif')
+        self.assertIn('X-Amz-Algorithm=AWS4-HMAC-SHA256', url)
+        self.assertNotIn('AWSAccessKeyId', url)
