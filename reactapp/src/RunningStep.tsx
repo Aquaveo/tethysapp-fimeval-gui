@@ -94,7 +94,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
         <div className="running-queued-dot" aria-hidden="true" />
         <p className="running-message">Waiting for a worker slot&hellip;</p>
         <p className="running-hint">
-          Jobs run two at a time so heavy evaluations never exhaust memory.
+          Your job is waiting for an available worker. It will start automatically.
         </p>
         <p className="running-jobid">(Job #{jobId})</p>
       </div>
