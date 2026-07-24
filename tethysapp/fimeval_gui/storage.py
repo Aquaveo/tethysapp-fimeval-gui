@@ -1,6 +1,7 @@
 import io
 
 import boto3
+from botocore.client import Config
 from botocore.exceptions import ClientError
 
 
@@ -20,19 +21,24 @@ class S3Storage:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
         )
-        # Presigned URLs are handed to the browser, so they must point at a host
-        # the browser can reach. When a public endpoint is configured (typical in
-        # production, where workers/web talk to MinIO over an internal address),
-        # presign against it; otherwise reuse the main client (dev: same host).
-        if public_endpoint_url:
-            self._presign_client = boto3.client(
-                's3',
-                endpoint_url=public_endpoint_url,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-            )
-        else:
-            self._presign_client = self._client
+        # Presigned URLs are handed to the browser, so the presign client is
+        # configured deliberately, independent of the main client:
+        #  - SigV4 (signature_version='s3v4'): the default SigV2 folds
+        #    Content-Type into the signature, and a browser PUT always sends a
+        #    Content-Type, producing SignatureDoesNotMatch (403). SigV4 keeps it
+        #    out of the signed headers, so the browser's header is ignored. The
+        #    region is required for the SigV4 credential scope (MinIO ignores it).
+        #  - endpoint: the browser-facing host when a public endpoint is set
+        #    (production, where the browser reaches MinIO at a different address
+        #    than the server does), else the same host as the main client (dev).
+        self._presign_client = boto3.client(
+            's3',
+            endpoint_url=(public_endpoint_url or endpoint_url) or None,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name='us-east-1',
+            config=Config(signature_version='s3v4'),
+        )
 
     def upload_bytes(self, data: bytes, key: str) -> str:
         """Upload raw ``data`` bytes to ``key``; returns the key."""
