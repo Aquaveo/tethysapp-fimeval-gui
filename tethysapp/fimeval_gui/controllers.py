@@ -29,7 +29,7 @@ def _get_storage():
         access_key=App.get_custom_setting('minio_access_key'),
         secret_key=App.get_custom_setting('minio_secret_key'),
         bucket=App.get_custom_setting('s3_bucket'),
-        public_endpoint_url=App.get_custom_setting('minio_public_endpoint_url'),
+        public_endpoint_url=App.get_custom_setting('s3_public_endpoint_url'),
     )
 
 

@@ -27,11 +27,13 @@ class App(TethysAppBase):
                 required=False,
             ),
             CustomSetting(
-                name='minio_public_endpoint_url',
+                name='s3_public_endpoint_url',
                 type=CustomSetting.TYPE_STRING,
                 description=(
-                    'Browser-facing MinIO/S3 URL used for presigned upload/download URLs. '
-                    'Leave blank to reuse minio_endpoint_url (correct for local dev).'
+                    'Browser-facing object-storage URL used for presigned upload/download '
+                    'URLs. Leave blank to reuse the server storage endpoint (correct for '
+                    'local dev); set in production when the browser reaches storage at a '
+                    'different host than the server does.'
                 ),
                 required=False,
             ),
