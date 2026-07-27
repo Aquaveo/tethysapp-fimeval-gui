@@ -415,7 +415,10 @@ class TestStatusEndpoint(TethysTestCase):
     def _get(self, job_id):
         return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/')
 
-    def test_status_returns_200_with_dask_running(self):
+    def test_status_returns_queued_for_pending_without_props(self):
+        # Dask 'pending' is ambiguous (queued OR executing). With no
+        # extended_properties the marker check can't run, so the endpoint
+        # reports the un-promoted state: queued.
         job = self._make_job(self.user)
         mock_future = MagicMock()
         mock_future.status = 'pending'
@@ -430,7 +433,7 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
         self.assertEqual(body['job_id'], 42)
-        self.assertEqual(body['status'], 'running')
+        self.assertEqual(body['status'], 'queued')
 
     def test_status_returns_complete_when_dask_finished(self):
         job = self._make_job(self.user)
@@ -488,8 +491,23 @@ class TestStatusEndpoint(TethysTestCase):
             'running',
         )
 
-    def test_status_returns_running_when_no_outputs_in_s3(self):
-        self.assertEqual(self._status_with_keys([]), 'running')
+    def test_status_returns_queued_when_no_outputs_in_s3(self):
+        # Pending future + empty output prefix = waiting for a worker slot.
+        self.assertEqual(self._status_with_keys([]), 'queued')
+
+    def test_status_running_with_running_marker(self):
+        self.assertEqual(
+            self._status_with_keys(['outputs/1/uid1/_RUNNING']), 'running'
+        )
+
+    def test_status_complete_wins_over_running_marker(self):
+        self.assertEqual(
+            self._status_with_keys([
+                'outputs/1/uid1/_RUNNING',
+                'outputs/1/uid1/_SUCCESS',
+            ]),
+            'complete',
+        )
 
     def test_status_returns_404_for_unknown_job(self):
         from tethys_sdk.jobs import DaskJob
@@ -560,6 +578,7 @@ class TestOutputsEndpoint(TethysTestCase):
         mock_storage.list_prefix.return_value = [
             'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv',
             'outputs/1/uid1/_SUCCESS',
+            'outputs/1/uid1/_RUNNING',
         ]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -568,6 +587,7 @@ class TestOutputsEndpoint(TethysTestCase):
         names = [f['name'] for f in json.loads(response.content)['files']]
         self.assertIn('EvaluationMetrics.csv', names)
         self.assertNotIn('_SUCCESS', names)
+        self.assertNotIn('_RUNNING', names)
 
     def test_outputs_returns_files_even_if_status_not_com(self):
         # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence
@@ -923,7 +943,10 @@ class TestDownloadAllEndpoint(TethysTestCase):
     def test_download_all_excludes_markers(self):
         job = self._make_job()
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = self.KEYS + ['outputs/1/uid1/_SUCCESS']
+        mock_storage.list_prefix.return_value = self.KEYS + [
+            'outputs/1/uid1/_SUCCESS',
+            'outputs/1/uid1/_RUNNING',
+        ]
         mock_storage.get_object.side_effect = lambda key: {'Body': io.BytesIO(b'x')}
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -931,6 +954,7 @@ class TestDownloadAllEndpoint(TethysTestCase):
             response = self._get(91)
         zf = zipfile.ZipFile(io.BytesIO(b''.join(response.streaming_content)))
         self.assertNotIn('_SUCCESS', zf.namelist())
+        self.assertNotIn('_RUNNING', zf.namelist())
 
     def test_404_when_no_outputs(self):
         job = self._make_job()

@@ -221,3 +221,63 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
             captured.get('benchmark_exists', False),
             'benchmark.tif must exist inside case_study subdir of main_dir',
         )
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_running_marker_written_before_compute(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+        captured = {}
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            # The start marker must already be in S3 while compute runs — it is
+            # how the status endpoint distinguishes 'running' from 'queued'.
+            keys = [
+                obj['Key']
+                for page in s3.get_paginator('list_objects_v2').paginate(
+                    Bucket=BUCKET, Prefix='outputs/1/abc/'
+                )
+                for obj in page.get('Contents', [])
+            ]
+            captured['marker_during_compute'] = any(
+                k.endswith('/_RUNNING') for k in keys
+            )
+            _emit_success_outputs(output_dir)
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        self.assertTrue(captured.get('marker_during_compute', False))
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_running_marker_coexists_with_terminal_marker_on_failure(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            os.makedirs(output_dir, exist_ok=True)  # no metrics → failure path
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        with self.assertRaises(RuntimeError):
+            run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG)
+
+        keys = [
+            obj['Key']
+            for page in s3.get_paginator('list_objects_v2').paginate(
+                Bucket=BUCKET, Prefix='outputs/1/abc/'
+            )
+            for obj in page.get('Contents', [])
+        ]
+        # Both markers present; terminal wins at the status endpoint (Task 3).
+        self.assertTrue(any(k.endswith('/_RUNNING') for k in keys), keys)
+        self.assertTrue(any(k.endswith('/_FAILED') for k in keys), keys)
