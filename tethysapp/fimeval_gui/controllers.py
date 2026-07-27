@@ -29,6 +29,7 @@ def _get_storage():
         access_key=App.get_custom_setting('minio_access_key'),
         secret_key=App.get_custom_setting('minio_secret_key'),
         bucket=App.get_custom_setting('s3_bucket'),
+        public_endpoint_url=App.get_custom_setting('s3_public_endpoint_url'),
     )
 
 
@@ -86,6 +87,18 @@ def _validate_upload(f, allowed_exts):
         return f"'{f.name}': file is empty"
     if f.size > MAX_UPLOAD_BYTES:
         return f"'{f.name}': exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB per-file limit"
+    return None
+
+
+def _validate_filename(name, allowed_exts):
+    """Return an error message if *name* has a disallowed extension, else None.
+
+    Extension-only check for the presigned-upload path, where the bytes go
+    straight to storage and the server never sees the file object.
+    """
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in allowed_exts:
+        return f"'{name}': unsupported file type (allowed: {', '.join(sorted(allowed_exts))})"
     return None
 
 
@@ -165,6 +178,86 @@ def api_upload(request):
     })
 
 
+@controller(url='api/upload/presign', login_required=True, name='api_upload_presign')
+def api_upload_presign(request):
+    """POST ``{benchmark, candidates[], boundary[]}`` (filenames): mint a fresh
+    ``upload_id`` and a presigned PUT URL per file so the browser uploads
+    directly to MinIO — Django never receives the file bytes.
+
+    Returns ``{upload_id, targets: [{field, filename, key, url}]}`` where
+    ``field`` is ``benchmark`` / ``candidate`` / ``boundary``. 400 on a bad
+    manifest; 503 if storage is unavailable.
+
+    Note: extension and count are validated here, but a plain presigned PUT
+    cannot enforce a per-file size cap server-side (the browser talks straight
+    to MinIO), so ``MAX_UPLOAD_BYTES`` is advisory/client-side for this path.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        body = json_module.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    benchmark = body.get('benchmark')
+    candidates = body.get('candidates') or []
+    boundary = body.get('boundary') or []
+
+    if not benchmark:
+        return JsonResponse({'error': 'benchmark file is required'}, status=400)
+    if not candidates:
+        return JsonResponse({'error': 'at least one candidate file is required'}, status=400)
+    if len(candidates) > MAX_CANDIDATES:
+        return JsonResponse({'error': f'too many candidates (max {MAX_CANDIDATES})'}, status=400)
+
+    for name in [benchmark, *candidates]:
+        err = _validate_filename(name, RASTER_EXT)
+        if err:
+            return JsonResponse({'error': err}, status=400)
+    if boundary:
+        for name in boundary:
+            err = _validate_filename(name, ALLOWED_BOUNDARY_EXT)
+            if err:
+                return JsonResponse({'error': err}, status=400)
+        if not any(os.path.splitext(n)[1].lower() == '.shp' for n in boundary):
+            return JsonResponse(
+                {'error': 'shapefile bundle must include a .shp file'}, status=400,
+            )
+
+    upload_id = str(uuid.uuid4())
+    user_id = str(request.user.id)
+    prefix = f'uploads/{user_id}/{upload_id}/'
+    storage = _get_storage()
+
+    try:
+        targets = [{
+            'field': 'benchmark',
+            'filename': benchmark,
+            'key': f'{prefix}benchmark.tif',
+            'url': storage.presigned_put_url(f'{prefix}benchmark.tif'),
+        }]
+        for i, name in enumerate(candidates):
+            key = f'{prefix}candidate_{i}.tif'
+            targets.append({
+                'field': 'candidate', 'filename': name, 'key': key,
+                'url': storage.presigned_put_url(key),
+            })
+        # Boundary components keep their original basenames so the shapefile
+        # stem stays consistent across .shp/.shx/.dbf/.prj.
+        for name in boundary:
+            key = f'{prefix}boundary/{os.path.basename(name)}'
+            targets.append({
+                'field': 'boundary', 'filename': name, 'key': key,
+                'url': storage.presigned_put_url(key),
+            })
+    except (ClientError, BotoCoreError) as exc:
+        logger.error('Presign failed for upload_id=%s: %s', upload_id, exc)
+        return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    return JsonResponse({'upload_id': upload_id, 'targets': targets})
+
+
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
 # Terminal markers the worker writes last; not user-facing output files.
@@ -199,17 +292,41 @@ def api_jobs_submit(request):
     storage = _get_storage()
 
     try:
-        if not storage.list_prefix(f'uploads/{user_id}/{upload_id}/'):
-            return JsonResponse({'error': 'upload_id not found'}, status=404)
-        if method == 'AOI':
-            boundary_keys = storage.list_prefix(f'uploads/{user_id}/{upload_id}/boundary/')
-            if not any(k.endswith('.shp') for k in boundary_keys):
-                return JsonResponse(
-                    {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
-                )
+        sizes = dict(storage.list_prefix_with_sizes(f'uploads/{user_id}/{upload_id}/'))
     except (ClientError, BotoCoreError) as exc:
         logger.error('S3 check failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
+
+    if not sizes:
+        return JsonResponse({'error': 'upload_id not found'}, status=404)
+
+    # Integrity check. With presigned uploads the bytes bypass Django, so this
+    # is the only server-side proof the files actually landed: confirm the
+    # benchmark and at least one candidate exist and are non-empty (a silently
+    # failed/expired PUT would otherwise submit a job that dies on the worker).
+    prefix = f'uploads/{user_id}/{upload_id}/'
+
+    def _basename(key):
+        return key.rsplit('/', 1)[-1]
+
+    has_benchmark = sizes.get(f'{prefix}benchmark.tif', 0) > 0
+    has_candidate = any(
+        _basename(k).startswith('candidate_') and k.endswith('.tif') and size > 0
+        for k, size in sizes.items()
+    )
+    if not has_benchmark or not has_candidate:
+        return JsonResponse(
+            {'error': 'upload incomplete — please re-upload'}, status=400,
+        )
+    if method == 'AOI':
+        has_shp = any(
+            f'{prefix}boundary/' in k and k.endswith('.shp') and size > 0
+            for k, size in sizes.items()
+        )
+        if not has_shp:
+            return JsonResponse(
+                {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
+            )
 
     s3_config = {
         'endpoint_url': App.get_custom_setting('minio_endpoint_url'),

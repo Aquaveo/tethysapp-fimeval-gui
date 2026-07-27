@@ -27,6 +27,17 @@ class App(TethysAppBase):
                 required=False,
             ),
             CustomSetting(
+                name='s3_public_endpoint_url',
+                type=CustomSetting.TYPE_STRING,
+                description=(
+                    'Browser-facing object-storage URL used for presigned upload/download '
+                    'URLs. Leave blank to reuse the server storage endpoint (correct for '
+                    'local dev); set in production when the browser reaches storage at a '
+                    'different host than the server does.'
+                ),
+                required=False,
+            ),
+            CustomSetting(
                 name='minio_access_key',
                 type=CustomSetting.TYPE_STRING,
                 description='MinIO/S3 access key',
