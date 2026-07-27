@@ -116,7 +116,9 @@ This application runs on:
 
   ```bash
   dask scheduler --port 8786
-  dask worker tcp://127.0.0.1:8786 --nworkers 2 --nthreads 1 --memory-limit 6GB
+  # Env-configurable; the defaults reproduce the 2-worker / 6 GB pool.
+  # Size it to your host with docs/specs/worker-sizing-guide.md.
+  ./tethysapp/fimeval_gui/scripts/start_worker.sh
   ```
 
   `--nworkers 2 --nthreads 1` runs each job in its own process (no GIL contention)
@@ -127,6 +129,10 @@ This application runs on:
   4.5 GB peak below Dask's ~80 % pause threshold while letting the nanny restart
   a truly runaway worker. Scale `--nworkers` with available RAM
   (≈ 6 GB per worker + headroom for the web server).
+
+  > Sizing the pool for your host (RAM → worker count / memory), including the
+  > dev-vs-separate-host topology: see
+  > [`docs/specs/worker-sizing-guide.md`](docs/specs/worker-sizing-guide.md).
 - **S3-compatible object storage** — a local **MinIO** instance on port 9000 (or AWS S3) for inputs and outputs
 - **ECharts** for the Bootstrap distribution charts (frontend dependency)
 
