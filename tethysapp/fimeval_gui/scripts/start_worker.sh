@@ -12,6 +12,11 @@
 #
 set -euo pipefail
 
+# Stream worker stdout live. fimeval prints its progress and (crucially) its
+# swallowed error messages; without this Python block-buffers to the pipe and
+# those only flush when the worker process exits, hiding failure causes.
+export PYTHONUNBUFFERED=1
+
 SCHEDULER="${FIMEVAL_SCHEDULER:-tcp://127.0.0.1:8786}"
 WORKERS="${FIMEVAL_WORKERS:-2}"
 THREADS="${FIMEVAL_THREADS:-1}"

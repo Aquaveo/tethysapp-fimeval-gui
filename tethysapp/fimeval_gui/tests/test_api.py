@@ -498,6 +498,11 @@ class TestStatusEndpoint(TethysTestCase):
         mock_future.status = 'pending'  # ephemeral -> running -> marker fallback
         mock_storage = MagicMock()
         mock_storage.list_prefix.return_value = keys
+        # The error path reads the _FAILED marker body for a reason; give the
+        # mock an empty body so serialization stays valid.
+        empty_body = MagicMock()
+        empty_body.read.return_value = b''
+        mock_storage.get_object.return_value = {'Body': empty_body}
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
              patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
@@ -517,6 +522,32 @@ class TestStatusEndpoint(TethysTestCase):
 
     def test_status_error_with_failed_marker(self):
         self.assertEqual(self._status_with_keys(['outputs/1/uid1/_FAILED']), 'error')
+
+    def test_status_error_includes_reason_from_failed_marker(self):
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = ['outputs/1/uid1/_FAILED']
+        body_stream = MagicMock()
+        body_stream.read.return_value = (
+            b'Error processing folder case_study: Too many points failed to transform'
+        )
+        mock_storage.get_object.return_value = {'Body': body_stream}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('Too many points failed to transform', body.get('reason', ''))
+        mock_storage.get_object.assert_called_once_with('outputs/1/uid1/_FAILED')
 
     def test_status_running_when_outputs_but_no_marker(self):
         # Outputs present but the terminal marker hasn't landed yet — must NOT

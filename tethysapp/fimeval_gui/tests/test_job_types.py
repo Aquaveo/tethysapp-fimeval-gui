@@ -121,6 +121,39 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')
+    def test_failed_marker_captures_fimeval_error_output(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            # fimeval swallows its own exceptions and only PRINTS them, then
+            # returns without an EvaluationMetrics.csv. The worker must capture
+            # that output so the real cause isn't lost.
+            os.makedirs(output_dir, exist_ok=True)
+            print(
+                'Error processing folder case_study: Too many points '
+                '(1296 out of 1296) failed to transform, unable to compute '
+                'output bounds.'
+            )
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        with self.assertRaises(RuntimeError):
+            run_evaluate_fim_task('abc', '1', 'intersected_extent', S3_CONFIG)
+
+        body = (
+            s3.get_object(Bucket=BUCKET, Key='outputs/1/abc/_FAILED')['Body']
+            .read()
+            .decode('utf-8', 'replace')
+        )
+        self.assertIn('Too many points', body)
+        self.assertIn('failed to transform', body)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
     def test_method_convex_hull_passed_to_fimeval(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)

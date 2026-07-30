@@ -449,6 +449,25 @@ def api_job_status(request, job_id):
             except (ClientError, BotoCoreError) as exc:
                 logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
 
+    # On failure, surface the reason the worker wrote into the _FAILED marker
+    # (fimeval's captured error) so the UI can show it instead of a generic
+    # message. Best-effort — a read failure must not break the status response.
+    reason = None
+    if status == 'error':
+        upload_id = props.get('upload_id')
+        user_id = props.get('user_id')
+        if upload_id and user_id:
+            try:
+                reason = (
+                    _get_storage()
+                    .get_object(f'outputs/{user_id}/{upload_id}/_FAILED')['Body']
+                    .read()
+                    .decode('utf-8', 'replace')
+                    .strip()
+                ) or None
+            except (ClientError, BotoCoreError, KeyError) as exc:
+                logger.warning('Failed to read _FAILED reason for job %s: %s', job_id, exc)
+
     return JsonResponse({
         'job_id': job.id,
         'status': status,
@@ -456,6 +475,7 @@ def api_job_status(request, job_id):
         'completed': job.completion_time.isoformat() if job.completion_time else None,
         'method': props.get('method'),
         'upload_id': props.get('upload_id'),
+        'reason': reason,
     })
 
 

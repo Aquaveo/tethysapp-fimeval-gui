@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import tempfile
 
@@ -11,6 +13,22 @@ from tethysapp.fimeval_gui.job_types.registry import JobType
 # candidate are in different CRSs. Without a target CRS fimeval only
 # auto-reprojects when every input passes its is_within_conus() check.
 TARGET_CRS = 'EPSG:5070'
+
+
+def _extract_failure_reason(captured_output: str) -> str:
+    """Pull the meaningful failure line(s) out of fimeval's captured stdout.
+
+    fimeval prints ``Error evaluating <name>: <msg>`` / ``Error processing ...``
+    when it swallows an exception and returns without metrics. Prefer those
+    lines; otherwise fall back to the tail of the output. Bounded so the
+    ``_FAILED`` marker body stays small.
+    """
+    lines = [ln for ln in captured_output.splitlines() if ln.strip()]
+    err_lines = [
+        ln for ln in lines if 'Error evaluating' in ln or 'Error processing' in ln
+    ]
+    reason = '\n'.join(err_lines or lines[-5:]).strip()
+    return reason[-2000:]
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
@@ -90,7 +108,18 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
-        fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
+        # fimeval swallows its own exceptions and only PRINTS them, returning
+        # with no EvaluationMetrics.csv. Capture its output so the real cause is
+        # preserved (in the _FAILED marker) instead of a generic message.
+        fimeval_output = io.StringIO()
+        with contextlib.redirect_stdout(fimeval_output), \
+                contextlib.redirect_stderr(fimeval_output):
+            fimeval.EvaluateFIM(
+                tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra
+            )
+        captured = fimeval_output.getvalue()
+        if captured:  # keep fimeval's output in the worker log too
+            print(captured, end='')
 
         # Upload everything FIMeval wrote to S3
         produced = set()
@@ -106,14 +135,18 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # terminal state once the full output set is present (no race with
         # /metrics or /bootstrap). EvaluationMetrics.csv is written only on a
         # successful evaluation; its absence means fimeval bailed (e.g. a CRS or
-        # footprint-intersection issue) and produced no usable results.
+        # footprint-intersection issue) and produced no usable results — the
+        # _FAILED marker then carries the captured reason so the UI can show it.
         succeeded = 'EvaluationMetrics.csv' in produced
-        client.put_object(
-            Bucket=bucket,
-            Key=output_prefix + ('_SUCCESS' if succeeded else '_FAILED'),
-            Body=b'',
-        )
-        if not succeeded:
+        if succeeded:
+            client.put_object(Bucket=bucket, Key=output_prefix + '_SUCCESS', Body=b'')
+        else:
+            reason = _extract_failure_reason(captured)
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + '_FAILED',
+                Body=reason.encode('utf-8'),
+            )
             raise RuntimeError(
                 f'fimeval produced no EvaluationMetrics.csv; evaluation failed '
                 f'(method={method}, upload_id={upload_id})'
