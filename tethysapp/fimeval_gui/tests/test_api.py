@@ -549,6 +549,36 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertIn('Too many points failed to transform', body.get('reason', ''))
         mock_storage.get_object.assert_called_once_with('outputs/1/uid1/_FAILED')
 
+    def test_status_times_out_a_stuck_non_terminal_job(self):
+        # A worker OOM-killed mid-task never writes a terminal marker, so the job
+        # would otherwise poll as 'running' forever. Past the timeout the endpoint
+        # must report a terminal 'error' with a reason so the UI stops.
+        import datetime
+        from django.utils import timezone
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        job.creation_time = timezone.now() - datetime.timedelta(hours=2)
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = ['outputs/1/uid1/_RUNNING']
+        empty = MagicMock()
+        empty.read.return_value = b''
+        mock_storage.get_object.return_value = {'Body': empty}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIsNotNone(body['reason'])
+        self.assertIn('did not complete', body['reason'].lower())
+
     def test_status_running_when_outputs_but_no_marker(self):
         # Outputs present but the terminal marker hasn't landed yet — must NOT
         # report complete (this is the race that blanked Results).

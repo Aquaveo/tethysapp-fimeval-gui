@@ -12,6 +12,7 @@ import zipfile
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
 from django.http import FileResponse, HttpResponseRedirect, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
@@ -386,6 +387,12 @@ _TETHYS_TO_STATUS = {
     'VAR': 'running',
 }
 
+# A running job that never reaches a terminal state — e.g. a worker OOM-killed
+# mid-task that never wrote a _FAILED marker, or one stuck in a restart loop —
+# would otherwise poll as 'running' forever. Past this wall-clock age it is
+# reported as a terminal error so the UI stops polling.
+_JOB_TIMEOUT_SECONDS = 30 * 60
+
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
 def api_job_status(request, job_id):
@@ -449,6 +456,15 @@ def api_job_status(request, job_id):
             except (ClientError, BotoCoreError) as exc:
                 logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
 
+    # Wall-clock safety net: a running job that never reached a terminal state
+    # is reported as a terminal error past the timeout so the UI stops polling.
+    timed_out = False
+    if status == 'running' and job.creation_time:
+        age = (timezone.now() - job.creation_time).total_seconds()
+        if age > _JOB_TIMEOUT_SECONDS:
+            status = 'error'
+            timed_out = True
+
     # On failure, surface the reason the worker wrote into the _FAILED marker
     # (fimeval's captured error) so the UI can show it instead of a generic
     # message. Best-effort — a read failure must not break the status response.
@@ -467,6 +483,11 @@ def api_job_status(request, job_id):
                 ) or None
             except (ClientError, BotoCoreError, KeyError) as exc:
                 logger.warning('Failed to read _FAILED reason for job %s: %s', job_id, exc)
+        if reason is None and timed_out:
+            reason = (
+                'Evaluation did not complete in time — the worker may have run '
+                'out of memory or the job is too large.'
+            )
 
     return JsonResponse({
         'job_id': job.id,
