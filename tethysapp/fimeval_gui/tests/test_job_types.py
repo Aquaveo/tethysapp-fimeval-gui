@@ -152,6 +152,78 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         self.assertIn('Too many points', body)
         self.assertIn('failed to transform', body)
 
+    def _put_geotiff(self, s3, key, width, height, west, north, res=10, crs='EPSG:5070'):
+        """Create a tiny in-memory GeoTIFF and upload it to the mock bucket."""
+        import numpy as np
+        import rasterio
+        from rasterio.io import MemoryFile
+        from rasterio.transform import from_origin
+        with MemoryFile() as mem:
+            with mem.open(
+                driver='GTiff', height=height, width=width, count=1, dtype='uint8',
+                crs=crs, transform=from_origin(west, north, res, res),
+            ) as ds:
+                ds.write(np.ones((height, width), dtype='uint8'), 1)
+            s3.put_object(Bucket=BUCKET, Key=key, Body=mem.read())
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_candidate_clipped_to_benchmark_extent(self, mock_eval):
+        import rasterio
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        # Small benchmark (200 m box) inside a much larger candidate (2 km box).
+        self._put_geotiff(s3, 'uploads/1/abc/benchmark.tif', 20, 20, west=1000, north=2000)
+        self._put_geotiff(s3, 'uploads/1/abc/candidate_0.tif', 200, 200, west=0, north=2000)
+
+        captured = {}
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            _emit_success_outputs(output_dir)
+            with rasterio.open(os.path.join(main_dir, 'case_study', 'candidate_0.tif')) as ds:
+                captured['px'] = ds.width * ds.height
+                captured['bounds'] = ds.bounds
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        # Candidate started at 200x200 = 40000 px; clipping to the benchmark
+        # extent (+buffer) must make it far smaller...
+        self.assertLess(captured['px'], 40000 // 4)
+        # ...while still covering the benchmark extent [1000,1200]x[1800,2000].
+        b = captured['bounds']
+        self.assertLessEqual(b.left, 1000)
+        self.assertGreaterEqual(b.right, 1200)
+        self.assertLessEqual(b.bottom, 1800)
+        self.assertGreaterEqual(b.top, 2000)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_no_overlap_fails_fast_with_reason(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        # Same CRS, disjoint extents — no spatial overlap.
+        self._put_geotiff(s3, 'uploads/1/abc/benchmark.tif', 20, 20, west=0, north=100)
+        self._put_geotiff(
+            s3, 'uploads/1/abc/candidate_0.tif', 20, 20, west=100000, north=100000
+        )
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        with self.assertRaises(RuntimeError):
+            run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        # fimeval must not run on non-overlapping inputs; the job fails fast with
+        # a reason in the _FAILED marker (surfaced to the UI by BE27).
+        mock_eval.assert_not_called()
+        body = (
+            s3.get_object(Bucket=BUCKET, Key='outputs/1/abc/_FAILED')['Body']
+            .read()
+            .decode('utf-8', 'replace')
+        )
+        self.assertIn('do not spatially overlap', body)
+
     @mock_aws
     @patch('fimeval.EvaluateFIM')
     def test_method_convex_hull_passed_to_fimeval(self, mock_eval):

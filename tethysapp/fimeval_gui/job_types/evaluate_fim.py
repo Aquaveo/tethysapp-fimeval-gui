@@ -31,6 +31,81 @@ def _extract_failure_reason(captured_output: str) -> str:
     return reason[-2000:]
 
 
+class _NoOverlapError(Exception):
+    """A candidate raster does not spatially overlap the benchmark."""
+
+
+def _clip_candidate_to_bounds(candidate_path, bounds, name):
+    """Clip ``candidate_path`` in place to ``bounds`` (in the candidate's CRS)."""
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    left, bottom, right, top = bounds
+    with rasterio.open(candidate_path) as src:
+        cl, cb, cr, ct = src.bounds
+        ileft, ibottom = max(left, cl), max(bottom, cb)
+        iright, itop = min(right, cr), min(top, ct)
+        if ileft >= iright or ibottom >= itop:
+            raise _NoOverlapError(
+                f"Benchmark and candidate '{name}' do not spatially overlap — "
+                f"check the inputs' coordinates and CRS."
+            )
+        window = from_bounds(ileft, ibottom, iright, itop, src.transform)
+        window = window.round_offsets().round_lengths()
+        data = src.read(window=window)
+        profile = src.profile.copy()
+        profile.update(
+            height=int(window.height),
+            width=int(window.width),
+            transform=src.window_transform(window),
+        )
+    with rasterio.open(candidate_path, 'w', **profile) as dst:
+        dst.write(data)
+
+
+def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
+    """Shrink each candidate raster to the benchmark's extent (+ a buffer) so
+    fimeval doesn't load and reproject the *full* candidate — a large candidate
+    otherwise blows the worker memory budget (FIMEVAL-BE31). Metric-safe: the
+    evaluation only ever covers benchmark ∩ candidate.
+
+    Raises ``_NoOverlapError`` when a candidate doesn't intersect the benchmark.
+    Any other read/clip problem is skipped (the job falls back to the full
+    candidate) rather than failing outright.
+    """
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    bench_path = os.path.join(case_dir, 'benchmark.tif')
+    try:
+        with rasterio.open(bench_path) as bench:
+            bench_bounds, bench_crs = bench.bounds, bench.crs
+    except Exception:
+        return  # unreadable benchmark — leave the inputs for fimeval to handle
+    if bench_crs is None:
+        return
+    for fname in sorted(os.listdir(case_dir)):
+        if fname == 'benchmark.tif' or not fname.lower().endswith('.tif'):
+            continue
+        cpath = os.path.join(case_dir, fname)
+        try:
+            with rasterio.open(cpath) as cand:
+                cand_crs = cand.crs
+            if cand_crs is None:
+                continue
+            left, bottom, right, top = transform_bounds(
+                bench_crs, cand_crs, *bench_bounds
+            )
+            bw, bh = (right - left) * buffer_frac, (top - bottom) * buffer_frac
+            _clip_candidate_to_bounds(
+                cpath, (left - bw, bottom - bh, right + bw, top + bh), fname
+            )
+        except _NoOverlapError:
+            raise
+        except Exception as exc:  # non-fatal: fall back to the full candidate
+            print(f'BE31: skipped pre-clip of {fname}: {exc}')
+
+
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
@@ -95,6 +170,21 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 else:
                     dest = os.path.join(case_dir, os.path.basename(rel))
                 client.download_file(bucket, obj['Key'], dest)
+
+        # Pre-clip each candidate to the benchmark extent so fimeval doesn't load
+        # and reproject the full (possibly 300+ Mpx) candidate (FIMEVAL-BE31).
+        # Non-overlapping inputs can't be evaluated — fail fast with a reason in
+        # the _FAILED marker (surfaced to the UI by BE27) instead of letting
+        # fimeval churn and bail with a generic message.
+        try:
+            _clip_candidates_to_benchmark(case_dir)
+        except _NoOverlapError as exc:
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + '_FAILED',
+                Body=str(exc).encode('utf-8'),
+            )
+            raise RuntimeError(str(exc)) from exc
 
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
