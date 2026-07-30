@@ -169,6 +169,53 @@ worker.
 
 ---
 
+### FIMEVAL-BE31 — Pre-clip candidate raster to the evaluation extent before running fimeval
+
+**Type:** Backend / Performance & Reliability · **Priority:** High · **Est:** ~2–3 d
+
+**Context**
+The 2026-07-30 client demo (2/10 failed + 1 hung) traced to **one root cause**: huge
+candidate rasters (**300–377 Mpixels**, ~232 km-wide EPSG:5070) paired with small
+benchmarks (4–19 Mpx). fimeval loads and reprojects the **entire** candidate before
+clipping — ~1.2–1.5 GB *per array* — so under 2-way concurrency the pool blows past
+the 6 GB worker budget. Three faces of the same problem:
+
+- **Hung job** (377 Mpx candidate): OOM-kill → Dask resubmit → OOM again → **loop,
+  never terminal** = "still running forever."
+- **intersected_extent + AOI** (304 Mpx candidates): mode-B "no CSV" failures —
+  **both reproduce as clean successes standalone** (ample RAM). So the inputs are
+  fine; they failed only under memory pressure. Same recurring transient as 07-28,
+  now clearly memory-driven.
+
+The evaluation only ever needs the **overlap** (within the benchmark extent, or the
+AOI boundary) — the other ~95 % of that 232 km candidate is loaded and reprojected
+for nothing.
+
+**Scope** *(our worker — do NOT modify fimeval)*
+- In `run_evaluate_fim_task`, after download and **before** calling `EvaluateFIM`,
+  **pre-clip each candidate** to the benchmark's bounding box (plus a small buffer;
+  for AOI, use the boundary extent) via a **windowed/warped read** (rasterio),
+  writing a small clipped candidate into the case-study dir in place of the full one.
+- Handle **CRS mismatch**: reproject the benchmark/AOI bbox into the candidate's CRS
+  to compute the read window (e.g. benchmark 32618 vs candidate 5070).
+- **No-overlap guard**: if the benchmark and candidate don't intersect, fail fast
+  with a clear message (feeds BE27/BE29).
+
+**Acceptance criteria**
+- A job with a 300+ Mpx candidate + small benchmark runs on the clipped candidate;
+  **peak worker memory stays well under the limit**, and it no longer OOMs under
+  2-way concurrency.
+- **Metrics are equivalent** to the un-clipped result (clipping to ⊇ the eval region
+  must not change overlap-based metrics) — verify explicitly with a buffer margin.
+- Noticeably faster (no full-candidate reproject).
+- No-overlap inputs fail fast with a clear reason.
+
+**Notes:** This is the fix that lets these **legitimate large jobs succeed**,
+complementing BE29 (predictability — no hangs/clean errors) and BE27 (visibility).
+It targets the actual memory driver rather than just rejecting big inputs.
+
+---
+
 ## GUI
 
 ### FIMEVAL-FE14 — "Input Files" disclosure in the run window

@@ -54,6 +54,9 @@ AWS S3 prod).
 - **BE30** — Persist original filenames + read resolution/CRS at submit
   (+ shapefile CRS for AOI); expose via `api_job_status` `inputs`
   *(~2 d; blocks FE14)*
+- **BE31** — Pre-clip candidate raster to the evaluation extent before fimeval
+  (windowed read + bbox reproject across CRS) — the *real* fix for the 300–377 Mpx
+  candidate OOM / memory-pressure failures seen in the 2026-07-30 demo *(~2–3 d)*
 - **FE14** — "Input Files ▶" collapsible in the run window showing
   name · resolution · CRS per input (+ boundary shapefile for AOI)
   *(~1 d; needs BE30)*
