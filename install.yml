@@ -19,6 +19,7 @@ requirements:
     - boto3
     - "moto[s3]"
     - "dask[distributed]"
+    - rio-tiler
 
 post:
   - scripts/build_frontend.sh
