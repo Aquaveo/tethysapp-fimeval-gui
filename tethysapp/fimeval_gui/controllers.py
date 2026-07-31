@@ -73,6 +73,27 @@ RASTER_EXT = {'.tif', '.tiff'}
 MAX_CANDIDATES = 10
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB per file
 
+# The worker clips candidates to the benchmark extent (BE31), so the benchmark's
+# own pixel count bounds the working memory. A benchmark above this budget would
+# OOM the worker even clipped. ~200 Mpx ≈ a heavy job that still fits two-up in
+# the default 6 GB-per-worker pool (a 304 Mpx run measured ~4.6 GB).
+MAX_EVAL_PIXELS = 200_000_000
+
+
+def _read_pixel_count(storage, key):
+    """Return ``width * height`` of the raster at *key*, or ``None`` if it can't
+    be read. Streams the object to a temp file and reads only the header (a range
+    read isn't portable across the MinIO/S3 mocks; ``/vsis3`` is a future
+    optimization). Never raises — the guard must not block on an I/O hiccup."""
+    import rasterio
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.tif') as tmp:
+            storage.download_to_path(key, tmp.name)
+            with rasterio.open(tmp.name) as ds:
+                return ds.width * ds.height
+    except Exception:
+        return None
+
 
 def _validate_upload(f, allowed_exts):
     """Return an error message if uploaded file *f* is unacceptable, else None.
@@ -328,6 +349,22 @@ def api_jobs_submit(request):
             return JsonResponse(
                 {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
             )
+
+    # Reject a benchmark too large for the worker memory budget. Post-BE31 the
+    # worker clips candidates to the benchmark extent, so the benchmark's own
+    # size bounds the working memory — a huge benchmark (fine resolution over a
+    # large extent, or one accidentally used as its own candidate) would still
+    # OOM. Read only its header; skip the guard if it can't be read.
+    bench_px = _read_pixel_count(_get_storage(), f'{prefix}benchmark.tif')
+    if bench_px and bench_px > MAX_EVAL_PIXELS:
+        return JsonResponse({
+            'error': (
+                f'Benchmark raster is too large ({bench_px / 1e6:.0f} Mpixels; '
+                f'limit {MAX_EVAL_PIXELS // 1_000_000} Mpixels). Reduce its '
+                f'resolution or extent, or raise the worker memory limit '
+                f'(FIMEVAL_WORKER_MEMORY).'
+            )
+        }, status=400)
 
     s3_config = {
         'endpoint_url': App.get_custom_setting('minio_endpoint_url'),

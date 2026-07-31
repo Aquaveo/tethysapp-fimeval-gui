@@ -320,6 +320,27 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_candidate('u_ec', body=b'')
         self.assertEqual(self._submit('u_ec').status_code, 400)
 
+    def test_submit_rejects_oversized_benchmark(self):
+        # A benchmark bigger than the pixel budget would OOM the worker even after
+        # BE31 clipping (working memory is bounded by the benchmark extent).
+        self._put_upload('u_big')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._read_pixel_count',
+            return_value=10_000_000_000,
+        ):
+            response = self._submit('u_big')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('too large', json.loads(response.content)['error'].lower())
+
+    def test_submit_allows_normal_benchmark_size(self):
+        # An unreadable/normal benchmark must not be blocked by the guard.
+        self._put_upload('u_ok')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._read_pixel_count', return_value=1000
+        ):
+            response = self._submit('u_ok')
+        self.assertEqual(response.status_code, 202)
+
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')
         response = self.client.post(
