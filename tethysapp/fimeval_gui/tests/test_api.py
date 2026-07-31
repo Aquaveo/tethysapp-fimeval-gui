@@ -1516,7 +1516,7 @@ class TestTileJsonEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
         self.assertEqual(len(body['bounds']), 4)
-        self.assertTrue(body['tiles'][0].endswith('/tiles/{z}/{x}/{y}.png'))
+        self.assertTrue(body['tiles'][0].endswith('/tiles/{z}/{x}/{y}.png/'))
         self.assertIn('minzoom', body)
 
     def test_tilejson_404_when_no_cog(self):
@@ -1534,3 +1534,50 @@ class TestTileJsonEndpoint(TethysTestCase):
             MockDJ.objects.get.return_value = job
             response = self._get(77)
         self.assertEqual(response.status_code, 403)
+
+    def test_tilejson_template_resolves_to_tile_endpoint(self):
+        # End-to-end consistency: the tile URL template the frontend receives
+        # must resolve directly to the tile endpoint (200), not a redirect or
+        # 404, so MapLibre never has to follow a per-tile 301.
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            tilejson_response = self._get(77)
+            template = json.loads(tilejson_response.content)['tiles'][0]
+            tile_url = template.replace('{z}/{x}/{y}', '0/0/0')
+            response = self.client.get(tile_url)
+        self.assertEqual(response.status_code, 200)
+
+    def _get_tile(self, job_id, z, x, y):
+        return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/{z}/{x}/{y}.png/')
+
+    def test_tile_in_bounds_returns_png(self):
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 0, 0, 0)  # z0 world tile always intersects
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertTrue(response.content[:8] == b'\x89PNG\r\n\x1a\n')
+
+    def test_tile_out_of_bounds_returns_204(self):
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 12, 0, 0)  # far from CONUS
+        self.assertEqual(response.status_code, 204)
+
+    def test_tile_404_when_no_cog(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src',
+                   return_value='/nonexistent/x.tif'):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 0, 0, 0)
+        self.assertEqual(response.status_code, 404)

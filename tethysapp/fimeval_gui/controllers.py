@@ -11,7 +11,7 @@ import zipfile
 
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
-from django.http import FileResponse, HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
@@ -703,11 +703,40 @@ def api_job_tilejson(request, job_id):
     base = request.build_absolute_uri(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/')
     return JsonResponse({
         'tilejson': '2.2.0',
-        'tiles': [base + '{z}/{x}/{y}.png'],
+        'tiles': [base + '{z}/{x}/{y}.png/'],
         'bounds': bounds,
         'minzoom': minzoom,
         'maxzoom': maxzoom,
     })
+
+
+@controller(url='api/jobs/{job_id}/tiles/{z}/{x}/{tile}', login_required=True, name='api_job_tile')
+def api_job_tile(request, job_id, z, x, tile):
+    """GET: a rio-tiler-rendered PNG tile of the job's contingency map.
+    204 outside the raster's bounds; 404 when there's no COG."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
+    try:
+        z, x, y = int(z), int(x), int(str(tile).split('.')[0])
+    except (TypeError, ValueError):
+        return HttpResponse(status=400)
+    props = job.extended_properties or {}
+    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'))
+    from rio_tiler.io import Reader
+    from rio_tiler.errors import TileOutsideBounds
+    try:
+        with Reader(src) as cog:
+            img = cog.tile(x, y, z)
+        png = img.render(img_format='PNG', colormap=CONTINGENCY_COLORMAP)
+        return HttpResponse(png, content_type='image/png')
+    except TileOutsideBounds:
+        return HttpResponse(status=204)
+    except Exception as exc:
+        logger.warning('Tile render failed for job %s (%s/%s/%s): %s', job_id, z, x, y, exc)
+        return HttpResponse(status=404)
 
 
 @controller(url='api/jobs/{job_id}/outputs', login_required=True, name='api_job_outputs')
