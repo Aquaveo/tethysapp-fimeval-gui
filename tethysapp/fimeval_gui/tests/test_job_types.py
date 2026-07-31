@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -254,6 +255,40 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         mock_eval.assert_called_once()
         self.assertIn('candidate_0.tif', captured['case_tifs'])
         self.assertNotIn('candidate_1.tif', captured['case_tifs'])
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_writes_inputs_metadata_json(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        self._put_geotiff(s3, 'uploads/1/abc/benchmark.tif', 20, 20, west=1000, north=2000)
+        self._put_geotiff(
+            s3, 'uploads/1/abc/candidate_0.tif', 60, 60, west=1000, north=2000, res=5
+        )
+        s3.put_object(
+            Bucket=BUCKET, Key='uploads/1/abc/manifest.json',
+            Body=json.dumps(
+                {'names': {'benchmark.tif': 'PSS.tif', 'candidate_0.tif': 'OWP.tif'}}
+            ).encode(),
+        )
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            _emit_success_outputs(output_dir)
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        meta = json.loads(
+            s3.get_object(Bucket=BUCKET, Key='outputs/1/abc/inputs.json')['Body'].read()
+        )
+        # Original names (from the manifest) + res/CRS read from the rasters.
+        self.assertEqual(meta['benchmark']['name'], 'PSS.tif')
+        self.assertEqual(meta['benchmark']['crs'], 'EPSG:5070')
+        self.assertEqual(len(meta['candidates']), 1)
+        self.assertEqual(meta['candidates'][0]['name'], 'OWP.tif')
+        self.assertEqual(meta['candidates'][0]['resolution'], [5.0, 5.0])
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')

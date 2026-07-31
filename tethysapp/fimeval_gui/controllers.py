@@ -277,13 +277,26 @@ def api_upload_presign(request):
         logger.error('Presign failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
 
+    # Persist the original filenames so the worker can label its input metadata
+    # with them (the stored keys are renamed benchmark.tif / candidate_i.tif).
+    # Control-plane metadata only — no uploaded file bytes pass through Django.
+    try:
+        names = {os.path.basename(t['key']): t['filename'] for t in targets}
+        storage.upload_bytes(
+            json_module.dumps({'names': names}).encode('utf-8'),
+            f'{prefix}manifest.json',
+        )
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning('Manifest write failed for upload_id=%s: %s', upload_id, exc)
+
     return JsonResponse({'upload_id': upload_id, 'targets': targets})
 
 
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
-# Terminal markers the worker writes last; not user-facing output files.
-JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING'}
+# Control-plane objects the worker writes to the output prefix (terminal markers
+# + the input-metadata file); not user-facing output files.
+JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING', 'inputs.json'}
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
@@ -526,6 +539,21 @@ def api_job_status(request, job_id):
                 'out of memory or the job is too large.'
             )
 
+    # Input metadata (FE14): the names + resolution/CRS the worker published, so
+    # the UI can show which files a run is evaluating. Best-effort.
+    inputs = None
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    if upload_id and user_id:
+        try:
+            inputs = json_module.loads(
+                _get_storage()
+                .get_object(f'outputs/{user_id}/{upload_id}/inputs.json')['Body']
+                .read()
+            )
+        except (ClientError, BotoCoreError, KeyError, ValueError) as exc:
+            logger.debug('No inputs.json for job %s: %s', job_id, exc)
+
     return JsonResponse({
         'job_id': job.id,
         'status': status,
@@ -534,6 +562,7 @@ def api_job_status(request, job_id):
         'method': props.get('method'),
         'upload_id': props.get('upload_id'),
         'reason': reason,
+        'inputs': inputs,
     })
 
 

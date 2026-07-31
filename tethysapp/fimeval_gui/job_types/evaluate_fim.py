@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import tempfile
 
@@ -138,6 +139,36 @@ def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
         )
 
 
+def _read_raster_crs_res(path):
+    """Return ``{'resolution': [x, y], 'crs': 'EPSG:...'}`` for a raster, or
+    ``None`` values if it can't be read."""
+    import rasterio
+
+    try:
+        with rasterio.open(path) as ds:
+            return {
+                'resolution': [ds.res[0], ds.res[1]],
+                'crs': str(ds.crs) if ds.crs else None,
+            }
+    except Exception:
+        return {'resolution': None, 'crs': None}
+
+
+def _read_vector_crs(shp_path):
+    """Return a shapefile's CRS as ``'EPSG:...'`` (from its ``.prj``), or None."""
+    try:
+        prj = os.path.splitext(shp_path)[0] + '.prj'
+        if os.path.exists(prj):
+            from pyproj import CRS
+
+            crs = CRS.from_wkt(open(prj).read())
+            epsg = crs.to_epsg()
+            return f'EPSG:{epsg}' if epsg else crs.to_string()
+    except Exception:
+        pass
+    return None
+
+
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
@@ -202,6 +233,50 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 else:
                     dest = os.path.join(case_dir, os.path.basename(rel))
                 client.download_file(bucket, obj['Key'], dest)
+
+        # Publish input metadata (FE14): map the renamed files back to their
+        # original names (from the presign manifest) and read res/CRS from the
+        # local downloads, so the UI can show which files a run is evaluating.
+        # Written before the (long) evaluation so it's available while running.
+        # Best-effort — never fatal to the run.
+        try:
+            names = json.loads(
+                client.get_object(Bucket=bucket, Key=input_prefix + 'manifest.json')[
+                    'Body'
+                ].read()
+            ).get('names', {})
+        except Exception:
+            names = {}
+
+        def _labelled(fname, path):
+            meta = _read_raster_crs_res(path)
+            meta['name'] = names.get(fname, fname)
+            return meta
+
+        inputs_meta = {
+            'benchmark': _labelled(
+                'benchmark.tif', os.path.join(case_dir, 'benchmark.tif')
+            ),
+            'candidates': [
+                _labelled(f, os.path.join(case_dir, f))
+                for f in sorted(os.listdir(case_dir))
+                if f != 'benchmark.tif' and f.lower().endswith('.tif')
+            ],
+        }
+        if shapefile_path:
+            shp_name = os.path.basename(shapefile_path)
+            inputs_meta['boundary'] = {
+                'name': names.get(shp_name, shp_name),
+                'crs': _read_vector_crs(shapefile_path),
+            }
+        try:
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + 'inputs.json',
+                Body=json.dumps(inputs_meta).encode('utf-8'),
+            )
+        except Exception:
+            pass
 
         # Pre-clip each candidate to the benchmark extent so fimeval doesn't load
         # and reproject the full (possibly 300+ Mpx) candidate (FIMEVAL-BE31).

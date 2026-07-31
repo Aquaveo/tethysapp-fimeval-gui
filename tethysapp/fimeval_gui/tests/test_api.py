@@ -568,7 +568,7 @@ class TestStatusEndpoint(TethysTestCase):
         body = json.loads(response.content)
         self.assertEqual(body['status'], 'error')
         self.assertIn('Too many points failed to transform', body.get('reason', ''))
-        mock_storage.get_object.assert_called_once_with('outputs/1/uid1/_FAILED')
+        mock_storage.get_object.assert_any_call('outputs/1/uid1/_FAILED')
 
     def test_status_times_out_a_stuck_non_terminal_job(self):
         # A worker OOM-killed mid-task never writes a terminal marker, so the job
@@ -599,6 +599,33 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertEqual(body['status'], 'error')
         self.assertIsNotNone(body['reason'])
         self.assertIn('did not complete', body['reason'].lower())
+
+    def test_status_returns_inputs_metadata(self):
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        mock_future = MagicMock()
+        mock_future.status = 'finished'  # complete
+        mock_storage = MagicMock()
+        body = MagicMock()
+        body.read.return_value = json.dumps({
+            'benchmark': {'name': 'PSS.tif', 'resolution': [10, 10], 'crs': 'EPSG:5070'},
+            'candidates': [
+                {'name': 'OWP.tif', 'resolution': [10, 10], 'crs': 'EPSG:5070'}
+            ],
+        }).encode()
+        mock_storage.get_object.return_value = {'Body': body}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        data = json.loads(response.content)
+        self.assertEqual(data['inputs']['benchmark']['name'], 'PSS.tif')
+        self.assertEqual(data['inputs']['candidates'][0]['crs'], 'EPSG:5070')
+        mock_storage.get_object.assert_called_with('outputs/1/uid1/inputs.json')
 
     def test_status_running_when_outputs_but_no_marker(self):
         # Outputs present but the terminal marker hasn't landed yet — must NOT
@@ -696,6 +723,7 @@ class TestOutputsEndpoint(TethysTestCase):
             'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv',
             'outputs/1/uid1/_SUCCESS',
             'outputs/1/uid1/_RUNNING',
+            'outputs/1/uid1/inputs.json',
         ]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -705,6 +733,7 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertIn('EvaluationMetrics.csv', names)
         self.assertNotIn('_SUCCESS', names)
         self.assertNotIn('_RUNNING', names)
+        self.assertNotIn('inputs.json', names)  # metadata, not a downloadable output
 
     def test_outputs_returns_files_even_if_status_not_com(self):
         # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence
@@ -1294,13 +1323,32 @@ class TestPresignEndpoint(TethysTestCase):
             self.assertIsInstance(t['url'], str)
             self.assertIn(t['key'], t['url'])
 
-    def test_presign_stores_no_objects(self):
-        """Presigning must not put any bytes in storage — that is the whole point."""
+    def test_presign_stores_no_file_bytes(self):
+        """Presigning must not put any uploaded file bytes in storage — the
+        browser uploads directly. Only a small manifest.json (original filenames)
+        is written; never benchmark.tif / candidate_*.tif bytes."""
         self._post({'benchmark': 'b.tif', 'candidates': ['c0.tif']})
-        remaining = boto3.client('s3', region_name='us-east-1').list_objects_v2(
-            Bucket=BUCKET, Prefix='uploads/',
+        keys = [
+            o['Key']
+            for o in boto3.client('s3', region_name='us-east-1')
+            .list_objects_v2(Bucket=BUCKET, Prefix='uploads/')
+            .get('Contents', [])
+        ]
+        self.assertTrue(keys, 'expected the manifest to be written')
+        self.assertTrue(all(k.endswith('/manifest.json') for k in keys), keys)
+
+    def test_presign_writes_manifest_of_original_names(self):
+        response = self._post(
+            {'benchmark': 'PSS_bench.tif', 'candidates': ['OWP.tif']}
         )
-        self.assertEqual(remaining.get('KeyCount', 0), 0)
+        upload_id = json.loads(response.content)['upload_id']
+        key = f'uploads/{self.user.id}/{upload_id}/manifest.json'
+        obj = boto3.client('s3', region_name='us-east-1').get_object(
+            Bucket=BUCKET, Key=key
+        )
+        names = json.loads(obj['Body'].read())['names']
+        self.assertEqual(names['benchmark.tif'], 'PSS_bench.tif')
+        self.assertEqual(names['candidate_0.tif'], 'OWP.tif')
 
     def test_boundary_targets_included(self):
         response = self._post({
