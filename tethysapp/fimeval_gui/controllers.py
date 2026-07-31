@@ -372,6 +372,31 @@ VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_ext
 # + the input-metadata file); not user-facing output files.
 JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING', 'inputs.json'}
 
+# Contingency raster class -> RGBA (fimeval: 1=TN 2=FP 3=FN 4=TP; 0=nodata; 5=water).
+CONTINGENCY_COLORMAP = {
+    0: (0, 0, 0, 0),
+    1: (210, 210, 210, 140),
+    2: (214, 39, 40, 220),
+    3: (255, 140, 0, 220),
+    4: (31, 119, 180, 220),
+    5: (20, 40, 80, 220),
+}
+
+
+def _contingency_cog_src(user_id, upload_id):
+    """rio-tiler source for a job's contingency COG. Production reads it from S3
+    via GDAL /vsis3 with the app's S3 credentials in the environment."""
+    import os as _os
+    _os.environ.setdefault('AWS_ACCESS_KEY_ID', App.get_custom_setting('minio_access_key') or '')
+    _os.environ.setdefault('AWS_SECRET_ACCESS_KEY', App.get_custom_setting('minio_secret_key') or '')
+    endpoint = App.get_custom_setting('minio_endpoint_url')
+    if endpoint:
+        _os.environ['AWS_S3_ENDPOINT'] = endpoint.replace('http://', '').replace('https://', '')
+        _os.environ['AWS_HTTPS'] = 'YES' if endpoint.startswith('https') else 'NO'
+        _os.environ['AWS_VIRTUAL_HOSTING'] = 'FALSE'
+    bucket = App.get_custom_setting('s3_bucket')
+    return f'/vsis3/{bucket}/outputs/{user_id}/{upload_id}/contingency.cog.tif'
+
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
 def api_jobs_submit(request):
@@ -652,6 +677,36 @@ def api_job_status(request, job_id):
         'upload_id': props.get('upload_id'),
         'reason': reason,
         'inputs': inputs,
+    })
+
+
+@controller(url='api/jobs/{job_id}/tiles.json', login_required=True, name='api_job_tilejson')
+def api_job_tilejson(request, job_id):
+    """GET: TileJSON for the job's contingency map (bounds + tile URL template).
+    404 when the job has no contingency COG."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    job, err = _get_owned_job(request, job_id)
+    if err:
+        return err
+    props = job.extended_properties or {}
+    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'))
+    from rio_tiler.constants import WGS84_CRS
+    from rio_tiler.io import Reader
+    try:
+        with Reader(src) as cog:
+            bounds = list(cog.get_geographic_bounds(WGS84_CRS))
+            minzoom, maxzoom = cog.minzoom, cog.maxzoom
+    except Exception as exc:
+        logger.info('No contingency tilejson for job %s: %s', job_id, exc)
+        return JsonResponse({'error': 'no contingency map'}, status=404)
+    base = request.build_absolute_uri(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/')
+    return JsonResponse({
+        'tilejson': '2.2.0',
+        'tiles': [base + '{z}/{x}/{y}.png'],
+        'bounds': bounds,
+        'minzoom': minzoom,
+        'maxzoom': maxzoom,
     })
 
 
