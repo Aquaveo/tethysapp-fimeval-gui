@@ -42,26 +42,20 @@ AWS S3 prod).
 
 ## 🔜 To Do
 
-### Reliability & Observability *(from the 2026-07 investigation)*
+### Reliability & Observability — ✅ shipped (in review)
 
-- **BE27** — Surface fimeval failure cause: capture `EvaluateFIM` stdout →
-  `_FAILED` marker + job status + UI; `PYTHONUNBUFFERED=1` in worker *(~1.5 d)*
-- **BE28** — Set `PROJ_NETWORK=OFF` in the worker (removes an unneeded transient
-  failure trigger) *(~0.5 d)*
-- **BE29** — OOM-killed jobs currently hang the UI 5+ min: emit a terminal error
-  on worker death (bound retries, wall-clock timeout, harden status endpoint) +
-  input guard (reject identical benchmark/candidate; pixel-budget check) *(~4 d)*
-- **BE30** — Persist original filenames + read resolution/CRS at submit
-  (+ shapefile CRS for AOI); expose via `api_job_status` `inputs`
-  *(~2 d; blocks FE14)*
-- **BE31** — Pre-clip candidate raster to the evaluation extent before fimeval
-  (windowed read + bbox reproject across CRS) — the *real* fix for the 300–377 Mpx
-  candidate OOM / memory-pressure failures seen in the 2026-07-30 demo *(~2–3 d)*
-- **FE14** — "Input Files ▶" collapsible in the run window showing
-  name · resolution · CRS per input (+ boundary shapefile for AOI)
-  *(~1 d; needs BE30)*
+The 2026-07 investigation + demo fixes are done, in two stacked PRs:
+- **PR #6** — **BE27** (surface fimeval failure cause), **BE28**
+  (`PROJ_NETWORK=OFF`), **BE31** (pre-clip candidate to the benchmark extent —
+  validated 4.6 GB → 0.5 GB peak, identical metrics).
+- **PR #7** (stacked on #6) — **BE29** (no-hang timeout · bounded worker-death
+  retries · pixel-budget input guard), **BE30** (persist + expose input
+  metadata), **FE14** ("Input Files" disclosure).
 
-### GUI Expansion
+Merge order **#6 → #7**. Follow-up: `/vsis3` range-read for the guard's benchmark
+header (avoid downloading a huge benchmark just to reject it).
+
+### GUI Expansion — the remaining GUI backlog *(FE14 shipped in PR #7)*
 
 - **FE15 — Interactive contingency map viewer** *(= roadmap "Version A")*:
   MapLibre overlay of the TP/FP/FN/TN raster with legend, basemap,
