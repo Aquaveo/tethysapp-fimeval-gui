@@ -153,6 +153,23 @@ export async function submitJob(
   return response.json();
 }
 
+export interface RasterInput {
+  name: string;
+  resolution: [number, number] | null;
+  crs: string | null;
+}
+
+export interface BoundaryInput {
+  name: string;
+  crs: string | null;
+}
+
+export interface JobInputs {
+  benchmark: RasterInput;
+  candidates: RasterInput[];
+  boundary?: BoundaryInput;
+}
+
 export interface JobStatus {
   job_id: number;
   status: 'submitted' | 'queued' | 'running' | 'complete' | 'error';
@@ -161,6 +178,7 @@ export interface JobStatus {
   method: string | null;
   upload_id: string | null;
   reason: string | null;
+  inputs: JobInputs | null;
 }
 
 export async function getJobStatus(jobId: number): Promise<JobStatus> {
