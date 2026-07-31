@@ -369,8 +369,9 @@ def api_upload_presign(request):
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
 # Control-plane objects the worker writes to the output prefix (terminal markers
-# + the input-metadata file); not user-facing output files.
-JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING', 'inputs.json'}
+# + the input-metadata file + the internal contingency tiling COG); not
+# user-facing output files.
+JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING', 'inputs.json', 'contingency.cog.tif'}
 
 # Contingency raster class -> RGBA (fimeval: 1=TN 2=FP 3=FN 4=TP; 0=nodata; 5=water).
 CONTINGENCY_COLORMAP = {

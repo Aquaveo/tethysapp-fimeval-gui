@@ -777,6 +777,7 @@ class TestOutputsEndpoint(TethysTestCase):
             'outputs/1/uid1/_SUCCESS',
             'outputs/1/uid1/_RUNNING',
             'outputs/1/uid1/inputs.json',
+            'outputs/1/uid1/contingency.cog.tif',
         ]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -787,6 +788,7 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertNotIn('_SUCCESS', names)
         self.assertNotIn('_RUNNING', names)
         self.assertNotIn('inputs.json', names)  # metadata, not a downloadable output
+        self.assertNotIn('contingency.cog.tif', names)
 
     def test_outputs_returns_files_even_if_status_not_com(self):
         # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence

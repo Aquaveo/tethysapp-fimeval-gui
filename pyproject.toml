@@ -25,7 +25,7 @@ dependencies = [
     "fimeval>=0.1.64",
     "boto3",
     "dask[distributed]",
-    "rio-tiler",
+    "rio-tiler>=6",
 ]
 dynamic = ["version"]
 

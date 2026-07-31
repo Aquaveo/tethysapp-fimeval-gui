@@ -83,7 +83,6 @@ def _write_contingency_cog(output_dir, client, bucket, output_prefix):
     """Find fimeval's ContingencyMAP raster and upload a COG copy for tiling
     (FE15). Best-effort — never fatal to the run."""
     import glob
-    import rasterio
     from rasterio.shutil import copy as rio_copy
     try:
         matches = glob.glob(
@@ -92,7 +91,7 @@ def _write_contingency_cog(output_dir, client, bucket, output_prefix):
         if not matches:
             return
         cog_path = os.path.join(os.path.dirname(output_dir), 'contingency.cog.tif')
-        rio_copy(matches[0], cog_path, driver='COG')
+        rio_copy(sorted(matches)[0], cog_path, driver='COG')
         client.upload_file(cog_path, bucket, output_prefix + 'contingency.cog.tif')
     except Exception as exc:  # noqa: BLE001 — map is additive
         print(f'FE15: contingency COG write skipped: {exc}')
