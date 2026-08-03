@@ -59,8 +59,22 @@ def _clip_candidate_to_bounds(candidate_path, bounds, name):
             width=int(window.width),
             transform=src.window_transform(window),
         )
+        # profile carries dtype/CRS/nodata/count; also preserve band tags and any
+        # colormap so the clip is equivalent to the source in all but extent.
+        src_tags = src.tags()
+        try:
+            src_colormap = src.colormap(1)
+        except (ValueError, IndexError):
+            src_colormap = None
     with rasterio.open(candidate_path, 'w', **profile) as dst:
         dst.write(data)
+        if src_tags:
+            dst.update_tags(**src_tags)
+        if src_colormap:
+            try:
+                dst.write_colormap(1, src_colormap)
+            except (ValueError, TypeError):
+                pass
 
 
 def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
@@ -69,9 +83,11 @@ def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
     otherwise blows the worker memory budget (FIMEVAL-BE31). Metric-safe: the
     evaluation only ever covers benchmark ∩ candidate.
 
-    Raises ``_NoOverlapError`` when a candidate doesn't intersect the benchmark.
-    Any other read/clip problem is skipped (the job falls back to the full
-    candidate) rather than failing outright.
+    A candidate that doesn't intersect the benchmark is dropped (its file is
+    removed) and the run continues on the remaining candidates. Raises
+    ``_NoOverlapError`` only when NO candidate overlaps the benchmark (nothing
+    left to evaluate). Any other read/clip problem is skipped (the job falls
+    back to the full candidate).
     """
     import rasterio
     from rasterio.warp import transform_bounds
@@ -84,9 +100,12 @@ def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
         return  # unreadable benchmark — leave the inputs for fimeval to handle
     if bench_crs is None:
         return
-    for fname in sorted(os.listdir(case_dir)):
-        if fname == 'benchmark.tif' or not fname.lower().endswith('.tif'):
-            continue
+
+    candidates = [
+        f for f in sorted(os.listdir(case_dir))
+        if f != 'benchmark.tif' and f.lower().endswith('.tif')
+    ]
+    for fname in candidates:
         cpath = os.path.join(case_dir, fname)
         try:
             with rasterio.open(cpath) as cand:
@@ -101,9 +120,22 @@ def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
                 cpath, (left - bw, bottom - bh, right + bw, top + bh), fname
             )
         except _NoOverlapError:
-            raise
+            # One non-overlapping candidate must not fail the whole job — drop it
+            # and keep evaluating the valid candidates.
+            os.remove(cpath)
+            print(f'BE31: dropped non-overlapping candidate {fname}')
         except Exception as exc:  # non-fatal: fall back to the full candidate
             print(f'BE31: skipped pre-clip of {fname}: {exc}')
+
+    remaining = [
+        f for f in os.listdir(case_dir)
+        if f != 'benchmark.tif' and f.lower().endswith('.tif')
+    ]
+    if candidates and not remaining:
+        raise _NoOverlapError(
+            "The benchmark and candidate(s) do not spatially overlap — "
+            "check their coordinates and CRS."
+        )
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):

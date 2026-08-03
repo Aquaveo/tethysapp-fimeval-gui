@@ -226,6 +226,37 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')
+    def test_one_bad_candidate_does_not_fail_the_job(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        self._put_geotiff(s3, 'uploads/1/abc/benchmark.tif', 20, 20, west=1000, north=2000)
+        # candidate_0 overlaps the benchmark; candidate_1 is disjoint.
+        self._put_geotiff(s3, 'uploads/1/abc/candidate_0.tif', 40, 40, west=1000, north=2000)
+        self._put_geotiff(
+            s3, 'uploads/1/abc/candidate_1.tif', 20, 20, west=500000, north=500000
+        )
+
+        captured = {}
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            _emit_success_outputs(output_dir)
+            captured['case_tifs'] = sorted(
+                f for f in os.listdir(os.path.join(main_dir, 'case_study'))
+                if f.endswith('.tif')
+            )
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        # The job runs: the disjoint candidate is dropped, the valid one kept.
+        mock_eval.assert_called_once()
+        self.assertIn('candidate_0.tif', captured['case_tifs'])
+        self.assertNotIn('candidate_1.tif', captured['case_tifs'])
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
     def test_method_convex_hull_passed_to_fimeval(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
