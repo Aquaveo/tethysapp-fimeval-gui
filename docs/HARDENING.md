@@ -54,6 +54,21 @@ cleanup) to keep it safe.
 - **Cache or accept a local PWB** layer to avoid the per-job ArcGIS dependency.
 - **Observability**: structured logs, job metrics, worker-health monitoring.
 
+## Tunable limits (environment variables)
+
+The guardrail constants are read from the environment at import time, so a
+deployment can size them to its worker pool / storage without a code change.
+Each falls back to the default below when unset or unparseable. Set them in the
+Dask worker's and Django's environment (both processes read them).
+
+| Variable | Default | What it caps |
+|----------|---------|--------------|
+| `FIMEVAL_MAX_CANDIDATES` | `10` | Candidate rasters accepted per job |
+| `FIMEVAL_MAX_UPLOAD_BYTES` | `1073741824` (1 GB) | Per-file upload size |
+| `FIMEVAL_MAX_EVAL_PIXELS` | `200000000` (200 Mpx) | Benchmark pixel budget the input guard enforces |
+| `FIMEVAL_JOB_TIMEOUT_SECONDS` | `1800` (30 min) | Wall-clock age after which a stuck job is reported as a terminal error |
+| `FIMEVAL_TARGET_CRS` | `EPSG:5070` | CRS fimeval reprojects all inputs to (CONUS Albers) |
+
 ## Notes on current safeguards (already in place)
 
 - Login required on all data endpoints; CSRF cookie enforced on POSTs.

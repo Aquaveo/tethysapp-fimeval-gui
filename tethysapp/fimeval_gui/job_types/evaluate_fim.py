@@ -13,7 +13,8 @@ from tethysapp.fimeval_gui.job_types.registry import JobType
 # instead of bailing ("Mixed or non-CONUS CRS detected") when the benchmark and
 # candidate are in different CRSs. Without a target CRS fimeval only
 # auto-reprojects when every input passes its is_within_conus() check.
-TARGET_CRS = 'EPSG:5070'
+# Overridable per deployment (e.g. a non-CONUS region) via env var.
+TARGET_CRS = os.environ.get('FIMEVAL_TARGET_CRS', 'EPSG:5070')
 
 
 def _extract_failure_reason(captured_output: str) -> str:

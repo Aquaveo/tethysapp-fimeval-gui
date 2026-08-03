@@ -68,16 +68,28 @@ def api_csrf(request):
 # Components of an ESRI shapefile bundle (only used by the AOI method).
 ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'}
 
-# Upload acceptance limits.
+def _env_int(name, default):
+    """Read a positive int from the environment, falling back to *default* when
+    unset or unparseable. Lets operators tune limits per deployment without a
+    code change (boss review: these were hardcoded)."""
+    try:
+        val = int(os.environ[name])
+        return val if val > 0 else default
+    except (KeyError, ValueError):
+        return default
+
+
+# Upload acceptance limits. Each is overridable via an env var so a deployment
+# can size them to its worker pool / storage without editing code.
 RASTER_EXT = {'.tif', '.tiff'}
-MAX_CANDIDATES = 10
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB per file
+MAX_CANDIDATES = _env_int('FIMEVAL_MAX_CANDIDATES', 10)
+MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 1024 * 1024 * 1024)  # 1 GB/file
 
 # The worker clips candidates to the benchmark extent (BE31), so the benchmark's
 # own pixel count bounds the working memory. A benchmark above this budget would
 # OOM the worker even clipped. ~200 Mpx ≈ a heavy job that still fits two-up in
 # the default 6 GB-per-worker pool (a 304 Mpx run measured ~4.6 GB).
-MAX_EVAL_PIXELS = 200_000_000
+MAX_EVAL_PIXELS = _env_int('FIMEVAL_MAX_EVAL_PIXELS', 200_000_000)
 
 
 def _read_pixel_count(storage, key):
@@ -440,8 +452,9 @@ _TETHYS_TO_STATUS = {
 # A running job that never reaches a terminal state — e.g. a worker OOM-killed
 # mid-task that never wrote a _FAILED marker, or one stuck in a restart loop —
 # would otherwise poll as 'running' forever. Past this wall-clock age it is
-# reported as a terminal error so the UI stops polling.
-_JOB_TIMEOUT_SECONDS = 30 * 60
+# reported as a terminal error so the UI stops polling. Overridable per
+# deployment (long-running pools may want a higher ceiling).
+_JOB_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_TIMEOUT_SECONDS', 30 * 60)
 
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
