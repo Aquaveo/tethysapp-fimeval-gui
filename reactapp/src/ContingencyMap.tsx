@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// maplibre resolves its worker via `new URL('./maplibre-gl-worker.mjs', <bundle url>)`,
+// a pattern its minified build hides from Vite's static analysis — so in a
+// production build Vite never emits the worker and the browser 404s for it.
+// Import the worker with `?worker&url` so Vite bundles it into a self-contained
+// asset and hands us the real (base-prefixed, hashed) URL to register.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { fetchTileJson, type TileJson } from './api';
 import './ContingencyMap.css';
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const ESRI_IMAGERY =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
