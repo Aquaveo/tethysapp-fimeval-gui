@@ -7,6 +7,28 @@
   border-radius: 8px;
   overflow: hidden;
 }
+.contingency-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+}
+.contingency-control {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-text-muted);
+}
+.contingency-control input[type='range'] {
+  width: 140px;
+}
+.contingency-control-value {
+  min-width: 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .contingency-legend {
   list-style: none;
   display: flex;

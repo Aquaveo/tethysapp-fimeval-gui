@@ -25,8 +25,11 @@ const LEGEND = [
 
 export default function ContingencyMap({ jobId }: { jobId: number }) {
   const container = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const [tj, setTj] = useState<TileJson | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [visible, setVisible] = useState(true);
+  const [opacity, setOpacity] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,8 +65,26 @@ export default function ContingencyMap({ jobId }: { jobId: number }) {
       fitBoundsOptions: { padding: 24 },
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    return () => map.remove();
+    mapRef.current = map;
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
   }, [tj]);
+
+  // Drive the overlay's visibility + opacity from the controls. Applies once the
+  // style is loaded (setPaint/Layout need the layer to exist).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      if (!map.getLayer('contingency')) return;
+      map.setLayoutProperty('contingency', 'visibility', visible ? 'visible' : 'none');
+      map.setPaintProperty('contingency', 'raster-opacity', opacity);
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [visible, opacity, tj]);
 
   if (unavailable) return null;
 
@@ -71,6 +92,29 @@ export default function ContingencyMap({ jobId }: { jobId: number }) {
     <div className="contingency-map">
       <div className="results-panel-title">Contingency Map</div>
       <div ref={container} className="contingency-map-canvas" />
+      <div className="contingency-controls">
+        <label className="contingency-control">
+          <input
+            type="checkbox"
+            checked={visible}
+            onChange={(e) => setVisible(e.target.checked)}
+          />
+          Show overlay
+        </label>
+        <label className="contingency-control">
+          Opacity
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={opacity}
+            disabled={!visible}
+            onChange={(e) => setOpacity(Number(e.target.value))}
+          />
+          <span className="contingency-control-value">{Math.round(opacity * 100)}%</span>
+        </label>
+      </div>
       <ul className="contingency-legend">
         {LEGEND.map((l) => (
           <li key={l.label}>
