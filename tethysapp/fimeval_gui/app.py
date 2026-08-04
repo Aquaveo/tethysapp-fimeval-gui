@@ -55,6 +55,16 @@ class App(TethysAppBase):
                 description='S3/MinIO bucket name (e.g. fimeval)',
                 required=True,
             ),
+            CustomSetting(
+                name='basemap_layers',
+                type=CustomSetting.TYPE_STRING,
+                description=(
+                    'Basemaps the contingency-map viewer offers, as a comma-separated '
+                    'list of: satellite, street, topographic. Order sets the switcher '
+                    'order; leave blank for all three (Satellite default).'
+                ),
+                required=False,
+            ),
         )
 
     def scheduler_settings(self):

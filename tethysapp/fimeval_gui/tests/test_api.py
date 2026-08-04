@@ -1583,3 +1583,66 @@ class TestTileJsonEndpoint(TethysTestCase):
             MockDJ.objects.get.return_value = job
             response = self._get_tile(77, 0, 0, 0)
         self.assertEqual(response.status_code, 404)
+
+
+class TestBasemapsEndpoint(TethysTestCase):
+    URL = '/apps/fimeval-gui/api/basemaps/'
+
+    def setUp(self):
+        super().setUp()
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.user = self.create_test_user(username='bm', password='pw', email='bm@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        super().tearDown()
+
+    def _set_setting(self, value):
+        self.mock_app.get_custom_setting.side_effect = (
+            lambda name: value if name == 'basemap_layers' else None
+        )
+
+    def _get(self):
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        return json.loads(resp.content)
+
+    def test_blank_setting_returns_all_presets_satellite_first(self):
+        self._set_setting(None)
+        body = self._get()
+        keys = [layer['key'] for layer in body['layers']]
+        self.assertEqual(keys, ['satellite', 'street', 'topographic'])
+        self.assertEqual(body['default'], 'satellite')
+        # Each layer carries what the frontend needs to render it.
+        for layer in body['layers']:
+            self.assertTrue(layer['label'])
+            self.assertIn('{z}', layer['url'])
+            self.assertTrue(layer['attribution'])
+
+    def test_setting_selects_and_orders_layers(self):
+        self._set_setting('street, satellite')
+        body = self._get()
+        self.assertEqual([l['key'] for l in body['layers']], ['street', 'satellite'])
+        # Satellite is present -> it stays the default selection.
+        self.assertEqual(body['default'], 'satellite')
+
+    def test_unknown_keys_filtered_default_is_first_present(self):
+        self._set_setting('street, bogus, topographic')
+        body = self._get()
+        self.assertEqual([l['key'] for l in body['layers']], ['street', 'topographic'])
+        # Satellite absent -> default falls back to the first configured layer.
+        self.assertEqual(body['default'], 'street')
+
+    def test_all_unknown_keys_falls_back_to_all_presets(self):
+        self._set_setting('bogus, nope')
+        body = self._get()
+        self.assertEqual([l['key'] for l in body['layers']], ['satellite', 'street', 'topographic'])
+        self.assertEqual(body['default'], 'satellite')
+
+    def test_post_not_allowed(self):
+        self._set_setting(None)
+        resp = self.client.post(self.URL)
+        self.assertEqual(resp.status_code, 405)
