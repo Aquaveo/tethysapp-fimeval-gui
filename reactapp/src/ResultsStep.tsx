@@ -117,6 +117,26 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
         </p>
       </header>
 
+      {/* Contingency map is the first output shown (FE21): the visual result of
+          the evaluation, above the numbers. Renders nothing when the job has no
+          contingency COG (e.g. an older run), so non-map jobs see no gap. */}
+      <ContingencyMap jobId={jobId} />
+
+      {/* Second: the primary analytical output — box plots for a bootstrap run,
+          the metrics table for every other method. (A bootstrap run still shows
+          the metrics table below, as supplementary detail.) */}
+      {bootstrap && bootstrap.candidates.length > 0 && (
+        <ErrorBoundary
+          fallback={
+            <div className="results-panel results-panel-title">
+              Could not render the bootstrap distribution chart.
+            </div>
+          }
+        >
+          <BootstrapBoxPlots data={bootstrap} />
+        </ErrorBoundary>
+      )}
+
       {headline.length > 0 && (
         <div className="results-cards">
           {headline.map((h) => (
@@ -155,20 +175,6 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
           </table>
         </div>
       )}
-
-      {bootstrap && bootstrap.candidates.length > 0 && (
-        <ErrorBoundary
-          fallback={
-            <div className="results-panel results-panel-title">
-              Could not render the bootstrap distribution chart.
-            </div>
-          }
-        >
-          <BootstrapBoxPlots data={bootstrap} />
-        </ErrorBoundary>
-      )}
-
-      <ContingencyMap jobId={jobId} />
 
       <div className="results-panel">
         <div className="results-downloadall">
