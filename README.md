@@ -128,7 +128,11 @@ This application runs on:
   `docs/specs/desktop-app-comparison-findings.md`). `--memory-limit 6GB` keeps a
   4.5 GB peak below Dask's ~80 % pause threshold while letting the nanny restart
   a truly runaway worker. Scale `--nworkers` with available RAM
-  (≈ 6 GB per worker + headroom for the web server).
+  (≈ 6 GB per worker + headroom for the web server). The wrapper also exports
+  `PROJ_NETWORK=OFF` (reprojections need no downloadable PROJ grids, so they
+  shouldn't depend on a CDN that can fail transiently under load) and
+  `PYTHONUNBUFFERED=1` (streams fimeval's progress/error output live instead of
+  buffering it until the worker exits).
 
   > Sizing the pool for your host (RAM → worker count / memory), including the
   > dev-vs-separate-host topology: see

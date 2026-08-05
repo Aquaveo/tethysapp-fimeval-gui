@@ -18,6 +18,7 @@ function formatElapsed(ms: number): string {
 
 function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
   const [errored, setErrored] = useState(false);
+  const [reason, setReason] = useState<string | null>(null);
   const [phase, setPhase] = useState<'submitted' | 'queued' | 'running'>('submitted');
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -35,6 +36,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
           return;
         }
         if (status.status === 'error') {
+          setReason(status.reason ?? null);
           setErrored(true);
           return;
         }
@@ -77,7 +79,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
     return (
       <div className="step-placeholder running-step">
         <h2>Evaluation Failed</h2>
-        <p className="running-error">The evaluation failed.</p>
+        <p className="running-error">{reason || 'The evaluation failed.'}</p>
         <div className="running-actions">
           <button type="button" className="button-primary" onClick={onReset}>
             Start Over

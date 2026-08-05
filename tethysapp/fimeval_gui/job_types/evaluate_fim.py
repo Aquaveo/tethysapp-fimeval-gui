@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import tempfile
 
@@ -11,6 +13,129 @@ from tethysapp.fimeval_gui.job_types.registry import JobType
 # candidate are in different CRSs. Without a target CRS fimeval only
 # auto-reprojects when every input passes its is_within_conus() check.
 TARGET_CRS = 'EPSG:5070'
+
+
+def _extract_failure_reason(captured_output: str) -> str:
+    """Pull the meaningful failure line(s) out of fimeval's captured stdout.
+
+    fimeval prints ``Error evaluating <name>: <msg>`` / ``Error processing ...``
+    when it swallows an exception and returns without metrics. Prefer those
+    lines; otherwise fall back to the tail of the output. Bounded so the
+    ``_FAILED`` marker body stays small.
+    """
+    lines = [ln for ln in captured_output.splitlines() if ln.strip()]
+    err_lines = [
+        ln for ln in lines if 'Error evaluating' in ln or 'Error processing' in ln
+    ]
+    reason = '\n'.join(err_lines or lines[-5:]).strip()
+    return reason[-2000:]
+
+
+class _NoOverlapError(Exception):
+    """A candidate raster does not spatially overlap the benchmark."""
+
+
+def _clip_candidate_to_bounds(candidate_path, bounds, name):
+    """Clip ``candidate_path`` in place to ``bounds`` (in the candidate's CRS)."""
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    left, bottom, right, top = bounds
+    with rasterio.open(candidate_path) as src:
+        cl, cb, cr, ct = src.bounds
+        ileft, ibottom = max(left, cl), max(bottom, cb)
+        iright, itop = min(right, cr), min(top, ct)
+        if ileft >= iright or ibottom >= itop:
+            raise _NoOverlapError(
+                f"Benchmark and candidate '{name}' do not spatially overlap — "
+                f"check the inputs' coordinates and CRS."
+            )
+        window = from_bounds(ileft, ibottom, iright, itop, src.transform)
+        window = window.round_offsets().round_lengths()
+        data = src.read(window=window)
+        profile = src.profile.copy()
+        profile.update(
+            height=int(window.height),
+            width=int(window.width),
+            transform=src.window_transform(window),
+        )
+        # profile carries dtype/CRS/nodata/count; also preserve band tags and any
+        # colormap so the clip is equivalent to the source in all but extent.
+        src_tags = src.tags()
+        try:
+            src_colormap = src.colormap(1)
+        except (ValueError, IndexError):
+            src_colormap = None
+    with rasterio.open(candidate_path, 'w', **profile) as dst:
+        dst.write(data)
+        if src_tags:
+            dst.update_tags(**src_tags)
+        if src_colormap:
+            try:
+                dst.write_colormap(1, src_colormap)
+            except (ValueError, TypeError):
+                pass
+
+
+def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
+    """Shrink each candidate raster to the benchmark's extent (+ a buffer) so
+    fimeval doesn't load and reproject the *full* candidate — a large candidate
+    otherwise blows the worker memory budget (FIMEVAL-BE31). Metric-safe: the
+    evaluation only ever covers benchmark ∩ candidate.
+
+    A candidate that doesn't intersect the benchmark is dropped (its file is
+    removed) and the run continues on the remaining candidates. Raises
+    ``_NoOverlapError`` only when NO candidate overlaps the benchmark (nothing
+    left to evaluate). Any other read/clip problem is skipped (the job falls
+    back to the full candidate).
+    """
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    bench_path = os.path.join(case_dir, 'benchmark.tif')
+    try:
+        with rasterio.open(bench_path) as bench:
+            bench_bounds, bench_crs = bench.bounds, bench.crs
+    except Exception:
+        return  # unreadable benchmark — leave the inputs for fimeval to handle
+    if bench_crs is None:
+        return
+
+    candidates = [
+        f for f in sorted(os.listdir(case_dir))
+        if f != 'benchmark.tif' and f.lower().endswith('.tif')
+    ]
+    for fname in candidates:
+        cpath = os.path.join(case_dir, fname)
+        try:
+            with rasterio.open(cpath) as cand:
+                cand_crs = cand.crs
+            if cand_crs is None:
+                continue
+            left, bottom, right, top = transform_bounds(
+                bench_crs, cand_crs, *bench_bounds
+            )
+            bw, bh = (right - left) * buffer_frac, (top - bottom) * buffer_frac
+            _clip_candidate_to_bounds(
+                cpath, (left - bw, bottom - bh, right + bw, top + bh), fname
+            )
+        except _NoOverlapError:
+            # One non-overlapping candidate must not fail the whole job — drop it
+            # and keep evaluating the valid candidates.
+            os.remove(cpath)
+            print(f'BE31: dropped non-overlapping candidate {fname}')
+        except Exception as exc:  # non-fatal: fall back to the full candidate
+            print(f'BE31: skipped pre-clip of {fname}: {exc}')
+
+    remaining = [
+        f for f in os.listdir(case_dir)
+        if f != 'benchmark.tif' and f.lower().endswith('.tif')
+    ]
+    if candidates and not remaining:
+        raise _NoOverlapError(
+            "The benchmark and candidate(s) do not spatially overlap — "
+            "check their coordinates and CRS."
+        )
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
@@ -78,6 +203,21 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                     dest = os.path.join(case_dir, os.path.basename(rel))
                 client.download_file(bucket, obj['Key'], dest)
 
+        # Pre-clip each candidate to the benchmark extent so fimeval doesn't load
+        # and reproject the full (possibly 300+ Mpx) candidate (FIMEVAL-BE31).
+        # Non-overlapping inputs can't be evaluated — fail fast with a reason in
+        # the _FAILED marker (surfaced to the UI by BE27) instead of letting
+        # fimeval churn and bail with a generic message.
+        try:
+            _clip_candidates_to_benchmark(case_dir)
+        except _NoOverlapError as exc:
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + '_FAILED',
+                Body=str(exc).encode('utf-8'),
+            )
+            raise RuntimeError(str(exc)) from exc
+
         # Run FIMeval — tmpdir is main_dir (contains case_study subdir)
         output_dir = os.path.join(tmpdir, 'outputs')
         os.makedirs(output_dir)
@@ -90,7 +230,18 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
-        fimeval.EvaluateFIM(tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra)
+        # fimeval swallows its own exceptions and only PRINTS them, returning
+        # with no EvaluationMetrics.csv. Capture its output so the real cause is
+        # preserved (in the _FAILED marker) instead of a generic message.
+        fimeval_output = io.StringIO()
+        with contextlib.redirect_stdout(fimeval_output), \
+                contextlib.redirect_stderr(fimeval_output):
+            fimeval.EvaluateFIM(
+                tmpdir, method, output_dir, target_crs=TARGET_CRS, **extra
+            )
+        captured = fimeval_output.getvalue()
+        if captured:  # keep fimeval's output in the worker log too
+            print(captured, end='')
 
         # Upload everything FIMeval wrote to S3
         produced = set()
@@ -106,14 +257,18 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # terminal state once the full output set is present (no race with
         # /metrics or /bootstrap). EvaluationMetrics.csv is written only on a
         # successful evaluation; its absence means fimeval bailed (e.g. a CRS or
-        # footprint-intersection issue) and produced no usable results.
+        # footprint-intersection issue) and produced no usable results — the
+        # _FAILED marker then carries the captured reason so the UI can show it.
         succeeded = 'EvaluationMetrics.csv' in produced
-        client.put_object(
-            Bucket=bucket,
-            Key=output_prefix + ('_SUCCESS' if succeeded else '_FAILED'),
-            Body=b'',
-        )
-        if not succeeded:
+        if succeeded:
+            client.put_object(Bucket=bucket, Key=output_prefix + '_SUCCESS', Body=b'')
+        else:
+            reason = _extract_failure_reason(captured)
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + '_FAILED',
+                Body=reason.encode('utf-8'),
+            )
             raise RuntimeError(
                 f'fimeval produced no EvaluationMetrics.csv; evaluation failed '
                 f'(method={method}, upload_id={upload_id})'

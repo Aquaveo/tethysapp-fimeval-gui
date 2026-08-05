@@ -160,6 +160,7 @@ export interface JobStatus {
   completed: string | null;
   method: string | null;
   upload_id: string | null;
+  reason: string | null;
 }
 
 export async function getJobStatus(jobId: number): Promise<JobStatus> {

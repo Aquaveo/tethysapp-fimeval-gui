@@ -12,6 +12,18 @@
 #
 set -euo pipefail
 
+# Stream worker stdout live. fimeval prints its progress and (crucially) its
+# swallowed error messages; without this Python block-buffers to the pipe and
+# those only flush when the worker process exits, hiding failure causes.
+export PYTHONUNBUFFERED=1
+
+# Reproject inputs offline. Our CRSs (UTM zones, CONUS Albers) resolve with no
+# downloadable PROJ grids. With PROJ_NETWORK on, PROJ reaches a CDN for grid
+# metadata, which can fail transiently under load and make every point fail to
+# transform ("Too many points failed to transform") — surfacing as a spurious
+# evaluation failure. Turning it off removes that whole failure class.
+export PROJ_NETWORK=OFF
+
 SCHEDULER="${FIMEVAL_SCHEDULER:-tcp://127.0.0.1:8786}"
 WORKERS="${FIMEVAL_WORKERS:-2}"
 THREADS="${FIMEVAL_THREADS:-1}"
