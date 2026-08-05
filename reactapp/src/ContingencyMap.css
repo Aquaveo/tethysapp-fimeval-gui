@@ -15,6 +15,31 @@
   margin: 0.6rem 0 0;
   font-size: 0.85rem;
 }
+.contingency-basemaps {
+  display: inline-flex;
+  border: 1px solid var(--color-surface-alt);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.contingency-basemap-btn {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.7rem;
+}
+.contingency-basemap-btn:first-child {
+  border-left: none;
+}
+.contingency-basemap-btn:hover {
+  color: var(--color-text);
+}
+.contingency-basemap-btn.is-active {
+  background: var(--color-primary, #2c7fb8);
+  color: #fff;
+}
 .contingency-control {
   display: flex;
   align-items: center;
