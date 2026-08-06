@@ -92,19 +92,81 @@ MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 1024 * 1024 * 1024)  # 1
 MAX_EVAL_PIXELS = _env_int('FIMEVAL_MAX_EVAL_PIXELS', 200_000_000)
 
 
-def _read_pixel_count(storage, key):
-    """Return ``width * height`` of the raster at *key*, or ``None`` if it can't
-    be read. Streams the object to a temp file and reads only the header (a range
-    read isn't portable across the MinIO/S3 mocks; ``/vsis3`` is a future
-    optimization). Never raises — the guard must not block on an I/O hiccup."""
+def _read_raster_geo(storage, key):
+    """Header-only geo of the raster at *key*: ``{bounds, crs, width, height}``,
+    or ``None`` if it can't be read. Streams the object to a temp file and reads
+    only the header (a range read isn't portable across the MinIO/S3 mocks;
+    ``/vsis3`` is a future optimization). Never raises — the guard must not block
+    on an I/O hiccup."""
     import rasterio
     try:
         with tempfile.NamedTemporaryFile(suffix='.tif') as tmp:
             storage.download_to_path(key, tmp.name)
             with rasterio.open(tmp.name) as ds:
-                return ds.width * ds.height
+                return {
+                    'bounds': tuple(ds.bounds),
+                    'crs': ds.crs,
+                    'width': ds.width,
+                    'height': ds.height,
+                }
     except Exception:
         return None
+
+
+# Aim a downsample at this fraction of the ceiling so the resampled job lands
+# comfortably under it rather than right at the edge.
+_DOWNSAMPLE_TARGET_FRACTION = 0.9
+
+
+def _estimate_working_pixels(storage, prefix, candidate_names):
+    """Estimate the pixel count fimeval will actually process.
+
+    fimeval's ``MakeFIMsUniform`` resamples every input to the *coarsest* input
+    resolution before evaluating, and (post-BE31) each candidate is clipped to
+    the benchmark extent. So the working set per candidate is roughly the
+    benchmark∩candidate overlap area divided by the coarsest pixel size squared —
+    NOT the benchmark's raw pixel count, which over-rejects fine-resolution
+    rasters that fimeval would coarsen anyway (the "Tier_1 rejected" bug).
+
+    Returns ``{'pixels': float, 'fit_resolution_m': float}`` for the
+    largest-working-set candidate (``fit_resolution_m`` is the resolution that
+    would bring it under the budget), or ``None`` if any header can't be read
+    (guard skipped) or nothing overlaps.
+    """
+    import math
+    from rasterio.warp import transform_bounds
+
+    METRIC_CRS = 'EPSG:5070'  # meters; matches the worker's TARGET_CRS
+    bench = _read_raster_geo(storage, f'{prefix}benchmark.tif')
+    if not bench or bench['crs'] is None:
+        return None
+
+    def geo_metric(geo):
+        """(bounds, coarsest-side resolution) for a raster, projected to meters."""
+        left, bottom, right, top = transform_bounds(geo['crs'], METRIC_CRS, *geo['bounds'])
+        res = max((right - left) / geo['width'], (top - bottom) / geo['height'])
+        return (left, bottom, right, top), res
+
+    b_bounds, b_res = geo_metric(bench)
+    best = None
+    for name in candidate_names:
+        cand = _read_raster_geo(storage, f'{prefix}{name}')
+        if not cand or cand['crs'] is None:
+            return None
+        c_bounds, c_res = geo_metric(cand)
+        coarsest = max(b_res, c_res)
+        ol_left = max(b_bounds[0], c_bounds[0])
+        ol_bottom = max(b_bounds[1], c_bounds[1])
+        ol_right = min(b_bounds[2], c_bounds[2])
+        ol_top = min(b_bounds[3], c_bounds[3])
+        if ol_right <= ol_left or ol_top <= ol_bottom:
+            continue  # no overlap — the worker drops this candidate (BE31)
+        area = (ol_right - ol_left) * (ol_top - ol_bottom)
+        pixels = area / (coarsest ** 2)
+        if best is None or pixels > best['pixels']:
+            fit = math.sqrt(area / (MAX_EVAL_PIXELS * _DOWNSAMPLE_TARGET_FRACTION))
+            best = {'pixels': pixels, 'fit_resolution_m': max(fit, coarsest)}
+    return best
 
 
 def _validate_upload(f, allowed_exts):
@@ -375,21 +437,33 @@ def api_jobs_submit(request):
                 {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
             )
 
-    # Reject a benchmark too large for the worker memory budget. Post-BE31 the
-    # worker clips candidates to the benchmark extent, so the benchmark's own
-    # size bounds the working memory — a huge benchmark (fine resolution over a
-    # large extent, or one accidentally used as its own candidate) would still
-    # OOM. Read only its header; skip the guard if it can't be read.
-    bench_px = _read_pixel_count(_get_storage(), f'{prefix}benchmark.tif')
-    if bench_px and bench_px > MAX_EVAL_PIXELS:
-        return JsonResponse({
-            'error': (
-                f'Benchmark raster is too large ({bench_px / 1e6:.0f} Mpixels; '
-                f'limit {MAX_EVAL_PIXELS // 1_000_000} Mpixels). Reduce its '
-                f'resolution or extent, or raise the worker memory limit '
-                f'(FIMEVAL_WORKER_MEMORY).'
-            )
-        }, status=400)
+    # Guard against a job too large for the worker to process, and offer a
+    # downsample path when it is. The working set is estimated post-uniformization
+    # (benchmark∩candidate at the coarsest input resolution) rather than from the
+    # benchmark's raw pixel count — fimeval downsamples inputs to the coarsest
+    # resolution anyway, so raw pixels wrongly reject coarsenable rasters. If the
+    # user accepts a downsample (``downsample: true``), we thread the fit
+    # resolution to the worker so it actually coarsens instead of OOMing again.
+    candidate_names = sorted(
+        _basename(k) for k, size in sizes.items()
+        if _basename(k).startswith('candidate_') and k.endswith('.tif') and size > 0
+    )
+    downsample = bool(body.get('downsample'))
+    target_resolution = None
+    est = _estimate_working_pixels(_get_storage(), prefix, candidate_names)
+    if est and est['pixels'] > MAX_EVAL_PIXELS:
+        if not downsample:
+            return JsonResponse({
+                'error': (
+                    'This evaluation is too large to run at full resolution '
+                    f'(about {est["pixels"] / 1e6:.0f} megapixels of overlapping '
+                    'area). You can run it at a coarser resolution instead.'
+                ),
+                'too_large': True,
+                'estimated_mpixels': round(est['pixels'] / 1e6),
+                'limit_mpixels': MAX_EVAL_PIXELS // 1_000_000,
+            }, status=400)
+        target_resolution = est['fit_resolution_m']
 
     s3_config = {
         'endpoint_url': App.get_custom_setting('minio_endpoint_url'),
@@ -416,9 +490,11 @@ def api_jobs_submit(request):
         'upload_id': upload_id,
         'user_id': user_id,
         'method': method,
+        'target_resolution': target_resolution,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
+        target_resolution=target_resolution,
     )
 
     try:

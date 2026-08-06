@@ -73,6 +73,24 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         # A target CRS is passed so fimeval reprojects mixed/non-CONUS inputs
         # instead of bailing with no outputs.
         self.assertEqual(mock_eval.call_args.kwargs.get('target_crs'), 'EPSG:5070')
+        # No downsample requested -> no target_resolution forced (fimeval uses
+        # the coarsest input resolution).
+        self.assertIsNone(mock_eval.call_args.kwargs.get('target_resolution'))
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_target_resolution_forwarded_to_fimeval(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG, target_resolution=30.0)
+
+        # The accepted downsample resolution reaches fimeval so it actually coarsens.
+        self.assertEqual(mock_eval.call_args.kwargs.get('target_resolution'), 30.0)
 
         output_keys = [
             obj['Key']

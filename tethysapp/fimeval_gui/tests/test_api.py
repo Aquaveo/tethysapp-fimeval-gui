@@ -290,15 +290,35 @@ class TestSubmitEndpoint(TethysTestCase):
             Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/candidate_{index}.tif', Body=body,
         )
 
+    def _put_geotiff(self, key, width, height, west, north, res, crs='EPSG:5070'):
+        """Upload a real (tiny) GeoTIFF with known resolution/extent to the mock
+        bucket, so the working-set estimate can read its header."""
+        import numpy as np
+        import rasterio
+        from rasterio.io import MemoryFile
+        from rasterio.transform import from_origin
+        with MemoryFile() as mem:
+            with mem.open(
+                driver='GTiff', height=height, width=width, count=1, dtype='uint8',
+                crs=crs, transform=from_origin(west, north, res, res),
+            ) as ds:
+                ds.write(np.ones((height, width), dtype='uint8'), 1)
+            boto3.client('s3', region_name='us-east-1').put_object(
+                Bucket=BUCKET, Key=key, Body=mem.read(),
+            )
+
     def _put_upload(self, upload_id):
         """Stage a complete upload: a non-empty benchmark and one candidate."""
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
-    def _submit(self, upload_id, method='smallest_extent'):
+    def _submit(self, upload_id, method='smallest_extent', downsample=False):
+        payload = {'upload_id': upload_id, 'method': method}
+        if downsample:
+            payload['downsample'] = True
         return self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': upload_id, 'method': method}),
+            data=json.dumps(payload),
             content_type='application/json',
         )
 
@@ -320,26 +340,59 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_candidate('u_ec', body=b'')
         self.assertEqual(self._submit('u_ec').status_code, 400)
 
-    def test_submit_rejects_oversized_benchmark(self):
-        # A benchmark bigger than the pixel budget would OOM the worker even after
-        # BE31 clipping (working memory is bounded by the benchmark extent).
+    def test_estimate_uses_coarsest_resolution_not_raw_benchmark(self):
+        # The Tier_1 bug: a fine-res benchmark (90k raw px) paired with a coarser
+        # candidate. fimeval downsamples both to the coarsest (10 m) resolution
+        # before evaluating, so the real working set is ~overlap/coarsest^2 —
+        # here ~900 px, NOT the benchmark's 90k. The guard must estimate the
+        # former, or huge-but-coarsenable Tier_1 rasters get wrongly rejected.
+        from tethysapp.fimeval_gui import controllers
+        self._put_geotiff('uploads/%s/u_est/benchmark.tif' % self.user.id,
+                          300, 300, west=1_000_000, north=2_000_000, res=1)
+        self._put_geotiff('uploads/%s/u_est/candidate_0.tif' % self.user.id,
+                          30, 30, west=1_000_000, north=2_000_000, res=10)
+        est = controllers._estimate_working_pixels(
+            controllers._get_storage(), 'uploads/%s/u_est/' % self.user.id,
+            ['candidate_0.tif'],
+        )
+        self.assertIsNotNone(est)
+        self.assertLess(est['pixels'], 5_000)      # ~900, nowhere near 90k
+        self.assertGreater(est['pixels'], 100)
+
+    def test_submit_rejects_oversized_working_set_with_reworded_message(self):
         self._put_upload('u_big')
         with patch(
-            'tethysapp.fimeval_gui.controllers._read_pixel_count',
-            return_value=10_000_000_000,
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 10_000_000_000, 'fit_resolution_m': 30.0},
         ):
             response = self._submit('u_big')
         self.assertEqual(response.status_code, 400)
-        self.assertIn('too large', json.loads(response.content)['error'].lower())
+        body = json.loads(response.content)
+        self.assertTrue(body['too_large'])
+        # Reworded (boss): never expose memory internals to the user.
+        self.assertNotIn('memory', body['error'].lower())
+        self.assertNotIn('fimeval_worker_memory', body['error'].lower())
 
-    def test_submit_allows_normal_benchmark_size(self):
-        # An unreadable/normal benchmark must not be blocked by the guard.
+    def test_submit_allows_small_working_set(self):
         self._put_upload('u_ok')
         with patch(
-            'tethysapp.fimeval_gui.controllers._read_pixel_count', return_value=1000
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
         ):
             response = self._submit('u_ok')
         self.assertEqual(response.status_code, 202)
+
+    def test_submit_downsample_bypasses_guard_and_threads_target_resolution(self):
+        self._put_upload('u_ds')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 10_000_000_000, 'fit_resolution_m': 30.0},
+        ):
+            response = self._submit('u_ds', downsample=True)
+        self.assertEqual(response.status_code, 202)
+        # The chosen fit resolution is threaded to the job so the worker actually
+        # coarsens (otherwise "Accept" would OOM again).
+        self.assertEqual(self.mock_job.extended_properties['target_resolution'], 30.0)
 
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')

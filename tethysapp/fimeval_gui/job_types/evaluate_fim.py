@@ -170,7 +170,8 @@ def _read_vector_crs(shp_path):
     return None
 
 
-def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
+def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict,
+                          target_resolution=None):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
     Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
@@ -306,6 +307,11 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
+        # When the user accepted a downsample at submit (job too large at full
+        # resolution), fimeval resamples every input to this resolution (meters)
+        # so the working set actually fits. None = use the coarsest input res.
+        if target_resolution:
+            extra['target_resolution'] = target_resolution
         # fimeval swallows its own exceptions and only PRINTS them, returning
         # with no EvaluationMetrics.csv. Capture its output so the real cause is
         # preserved (in the _FAILED marker) instead of a generic message.
@@ -360,4 +366,5 @@ class EvaluateFIMJobType(JobType):
             params['user_id'],
             params['method'],
             params['s3_config'],
+            target_resolution=params.get('target_resolution'),
         )
