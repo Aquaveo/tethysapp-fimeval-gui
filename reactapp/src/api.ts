@@ -136,10 +136,33 @@ export function putFile(
   });
 }
 
+// Structured "job too large" rejection the submit endpoint returns (400 with
+// too_large). Carries what the Accept/Reject modal shows.
+export interface TooLargeInfo {
+  too_large: true;
+  error: string;
+  estimated_mpixels: number;
+  limit_mpixels: number;
+}
+
+// Thrown by submitJob for the too-large case so the caller can offer a
+// downsample instead of showing a generic error.
+export class SubmitTooLargeError extends Error {
+  info: TooLargeInfo;
+  constructor(info: TooLargeInfo) {
+    super(info.error);
+    this.name = 'SubmitTooLargeError';
+    this.info = info;
+  }
+}
+
 export async function submitJob(
   uploadId: string,
   method: string,
+  downsample = false,
 ): Promise<SubmitResult> {
+  const payload: Record<string, unknown> = { upload_id: uploadId, method };
+  if (downsample) payload.downsample = true;
   const response = await fetch(`${API_BASE}/jobs/`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -147,9 +170,21 @@ export async function submitJob(
       'Content-Type': 'application/json',
       'X-CSRFToken': await csrfToken(),
     },
-    body: JSON.stringify({ upload_id: uploadId, method }),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) return parseError(response);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    if (response.status === 400 && data && data.too_large) {
+      throw new SubmitTooLargeError(data as TooLargeInfo);
+    }
+    const message =
+      data && typeof data.error === 'string'
+        ? data.error
+        : response.status === 403
+          ? 'Session problem (HTTP 403) — please refresh the page and try again'
+          : `Request failed (HTTP ${response.status})`;
+    throw new Error(message);
+  }
   return response.json();
 }
 
