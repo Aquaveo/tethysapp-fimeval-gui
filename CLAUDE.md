@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **When staging files for a commit, always use `git add .`** instead of adding files individually.
 
+**Ticket numbering — never invent FIMEVAL-BE*/FE* numbers.** The issue tracker (not this repo) is the sole source of truth for ticket numbers, and Claude has no access to it. Before assigning ANY new ticket number: (1) consult the authoritative registry (Claude's memory `reference_ticket_registry.md`, mirrored in `docs/tickets/backlog.md`), and (2) ask the user for the next free number from the tracker. Guessing sequential numbers has repeatedly collided with real tickets (e.g. FE14, BE19). Numbers assigned without the user confirming them from the tracker are provisional.
+
 ## Repository Layout
 
 The repository root contains:
