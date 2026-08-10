@@ -12,6 +12,7 @@ import zipfile
 from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
 from django.http import FileResponse, HttpResponseRedirect, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
@@ -67,10 +68,105 @@ def api_csrf(request):
 # Components of an ESRI shapefile bundle (only used by the AOI method).
 ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'}
 
-# Upload acceptance limits.
+def _env_int(name, default):
+    """Read a positive int from the environment, falling back to *default* when
+    unset or unparseable. Lets operators tune limits per deployment without a
+    code change (boss review: these were hardcoded)."""
+    try:
+        val = int(os.environ[name])
+        return val if val > 0 else default
+    except (KeyError, ValueError):
+        return default
+
+
+# Upload acceptance limits. Each is overridable via an env var so a deployment
+# can size them to its worker pool / storage without editing code.
 RASTER_EXT = {'.tif', '.tiff'}
-MAX_CANDIDATES = 10
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB per file
+MAX_CANDIDATES = _env_int('FIMEVAL_MAX_CANDIDATES', 10)
+MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 1024 * 1024 * 1024)  # 1 GB/file
+
+# The worker clips candidates to the benchmark extent (BE31), so the benchmark's
+# own pixel count bounds the working memory. A benchmark above this budget would
+# OOM the worker even clipped. ~200 Mpx ≈ a heavy job that still fits two-up in
+# the default 6 GB-per-worker pool (a 304 Mpx run measured ~4.6 GB).
+MAX_EVAL_PIXELS = _env_int('FIMEVAL_MAX_EVAL_PIXELS', 200_000_000)
+
+
+def _read_raster_geo(storage, key):
+    """Header-only geo of the raster at *key*: ``{bounds, crs, width, height}``,
+    or ``None`` if it can't be read. Streams the object to a temp file and reads
+    only the header (a range read isn't portable across the MinIO/S3 mocks;
+    ``/vsis3`` is a future optimization). Never raises — the guard must not block
+    on an I/O hiccup."""
+    import rasterio
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.tif') as tmp:
+            storage.download_to_path(key, tmp.name)
+            with rasterio.open(tmp.name) as ds:
+                return {
+                    'bounds': tuple(ds.bounds),
+                    'crs': ds.crs,
+                    'width': ds.width,
+                    'height': ds.height,
+                }
+    except Exception:
+        return None
+
+
+# Aim a downsample at this fraction of the ceiling so the resampled job lands
+# comfortably under it rather than right at the edge.
+_DOWNSAMPLE_TARGET_FRACTION = 0.9
+
+
+def _estimate_working_pixels(storage, prefix, candidate_names):
+    """Estimate the pixel count fimeval will actually process.
+
+    fimeval's ``MakeFIMsUniform`` resamples every input to the *coarsest* input
+    resolution before evaluating, and (post-BE31) each candidate is clipped to
+    the benchmark extent. So the working set per candidate is roughly the
+    benchmark∩candidate overlap area divided by the coarsest pixel size squared —
+    NOT the benchmark's raw pixel count, which over-rejects fine-resolution
+    rasters that fimeval would coarsen anyway (the "Tier_1 rejected" bug).
+
+    Returns ``{'pixels': float, 'fit_resolution_m': float}`` for the
+    largest-working-set candidate (``fit_resolution_m`` is the resolution that
+    would bring it under the budget), or ``None`` if any header can't be read
+    (guard skipped) or nothing overlaps.
+    """
+    import math
+    from rasterio.warp import transform_bounds
+
+    METRIC_CRS = 'EPSG:5070'  # meters; matches the worker's TARGET_CRS
+    bench = _read_raster_geo(storage, f'{prefix}benchmark.tif')
+    if not bench or bench['crs'] is None:
+        return None
+
+    def geo_metric(geo):
+        """(bounds, coarsest-side resolution) for a raster, projected to meters."""
+        left, bottom, right, top = transform_bounds(geo['crs'], METRIC_CRS, *geo['bounds'])
+        res = max((right - left) / geo['width'], (top - bottom) / geo['height'])
+        return (left, bottom, right, top), res
+
+    b_bounds, b_res = geo_metric(bench)
+    best = None
+    for name in candidate_names:
+        cand = _read_raster_geo(storage, f'{prefix}{name}')
+        if not cand or cand['crs'] is None:
+            return None
+        c_bounds, c_res = geo_metric(cand)
+        coarsest = max(b_res, c_res)
+        ol_left = max(b_bounds[0], c_bounds[0])
+        ol_bottom = max(b_bounds[1], c_bounds[1])
+        ol_right = min(b_bounds[2], c_bounds[2])
+        ol_top = min(b_bounds[3], c_bounds[3])
+        if ol_right <= ol_left or ol_top <= ol_bottom:
+            continue  # no overlap — the worker drops this candidate (BE31)
+        area = (ol_right - ol_left) * (ol_top - ol_bottom)
+        pixels = area / (coarsest ** 2)
+        if best is None or pixels > best['pixels']:
+            fit = math.sqrt(area / (MAX_EVAL_PIXELS * _DOWNSAMPLE_TARGET_FRACTION))
+            best = {'pixels': pixels, 'fit_resolution_m': max(fit, coarsest)}
+    return best
 
 
 def _validate_upload(f, allowed_exts):
@@ -255,13 +351,26 @@ def api_upload_presign(request):
         logger.error('Presign failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
 
+    # Persist the original filenames so the worker can label its input metadata
+    # with them (the stored keys are renamed benchmark.tif / candidate_i.tif).
+    # Control-plane metadata only — no uploaded file bytes pass through Django.
+    try:
+        names = {os.path.basename(t['key']): t['filename'] for t in targets}
+        storage.upload_bytes(
+            json_module.dumps({'names': names}).encode('utf-8'),
+            f'{prefix}manifest.json',
+        )
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning('Manifest write failed for upload_id=%s: %s', upload_id, exc)
+
     return JsonResponse({'upload_id': upload_id, 'targets': targets})
 
 
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 
-# Terminal markers the worker writes last; not user-facing output files.
-JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING'}
+# Control-plane objects the worker writes to the output prefix (terminal markers
+# + the input-metadata file); not user-facing output files.
+JOB_MARKERS = {'_SUCCESS', '_FAILED', '_RUNNING', 'inputs.json'}
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
@@ -328,6 +437,34 @@ def api_jobs_submit(request):
                 {'error': 'AOI requires a shapefile (.shp + sidecars)'}, status=400,
             )
 
+    # Guard against a job too large for the worker to process, and offer a
+    # downsample path when it is. The working set is estimated post-uniformization
+    # (benchmark∩candidate at the coarsest input resolution) rather than from the
+    # benchmark's raw pixel count — fimeval downsamples inputs to the coarsest
+    # resolution anyway, so raw pixels wrongly reject coarsenable rasters. If the
+    # user accepts a downsample (``downsample: true``), we thread the fit
+    # resolution to the worker so it actually coarsens instead of OOMing again.
+    candidate_names = sorted(
+        _basename(k) for k, size in sizes.items()
+        if _basename(k).startswith('candidate_') and k.endswith('.tif') and size > 0
+    )
+    downsample = bool(body.get('downsample'))
+    target_resolution = None
+    est = _estimate_working_pixels(_get_storage(), prefix, candidate_names)
+    if est and est['pixels'] > MAX_EVAL_PIXELS:
+        if not downsample:
+            return JsonResponse({
+                'error': (
+                    'This evaluation is too large to run at full resolution '
+                    f'(about {est["pixels"] / 1e6:.0f} megapixels of overlapping '
+                    'area). You can run it at a coarser resolution instead.'
+                ),
+                'too_large': True,
+                'estimated_mpixels': round(est['pixels'] / 1e6),
+                'limit_mpixels': MAX_EVAL_PIXELS // 1_000_000,
+            }, status=400)
+        target_resolution = est['fit_resolution_m']
+
     s3_config = {
         'endpoint_url': App.get_custom_setting('minio_endpoint_url'),
         'access_key': App.get_custom_setting('minio_access_key'),
@@ -353,9 +490,11 @@ def api_jobs_submit(request):
         'upload_id': upload_id,
         'user_id': user_id,
         'method': method,
+        'target_resolution': target_resolution,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
+        target_resolution=target_resolution,
     )
 
     try:
@@ -385,6 +524,13 @@ _TETHYS_TO_STATUS = {
     'ABT': 'error',
     'VAR': 'running',
 }
+
+# A running job that never reaches a terminal state — e.g. a worker OOM-killed
+# mid-task that never wrote a _FAILED marker, or one stuck in a restart loop —
+# would otherwise poll as 'running' forever. Past this wall-clock age it is
+# reported as a terminal error so the UI stops polling. Overridable per
+# deployment (long-running pools may want a higher ceiling).
+_JOB_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_TIMEOUT_SECONDS', 30 * 60)
 
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
@@ -449,6 +595,15 @@ def api_job_status(request, job_id):
             except (ClientError, BotoCoreError) as exc:
                 logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
 
+    # Wall-clock safety net: a running job that never reached a terminal state
+    # is reported as a terminal error past the timeout so the UI stops polling.
+    timed_out = False
+    if status == 'running' and job.creation_time:
+        age = (timezone.now() - job.creation_time).total_seconds()
+        if age > _JOB_TIMEOUT_SECONDS:
+            status = 'error'
+            timed_out = True
+
     # On failure, surface the reason the worker wrote into the _FAILED marker
     # (fimeval's captured error) so the UI can show it instead of a generic
     # message. Best-effort — a read failure must not break the status response.
@@ -467,6 +622,26 @@ def api_job_status(request, job_id):
                 ) or None
             except (ClientError, BotoCoreError, KeyError) as exc:
                 logger.warning('Failed to read _FAILED reason for job %s: %s', job_id, exc)
+        if reason is None and timed_out:
+            reason = (
+                'Evaluation did not complete in time — the worker may have run '
+                'out of memory or the job is too large.'
+            )
+
+    # Input metadata (FE14): the names + resolution/CRS the worker published, so
+    # the UI can show which files a run is evaluating. Best-effort.
+    inputs = None
+    upload_id = props.get('upload_id')
+    user_id = props.get('user_id')
+    if upload_id and user_id:
+        try:
+            inputs = json_module.loads(
+                _get_storage()
+                .get_object(f'outputs/{user_id}/{upload_id}/inputs.json')['Body']
+                .read()
+            )
+        except (ClientError, BotoCoreError, KeyError, ValueError) as exc:
+            logger.debug('No inputs.json for job %s: %s', job_id, exc)
 
     return JsonResponse({
         'job_id': job.id,
@@ -476,6 +651,7 @@ def api_job_status(request, job_id):
         'method': props.get('method'),
         'upload_id': props.get('upload_id'),
         'reason': reason,
+        'inputs': inputs,
     })
 
 

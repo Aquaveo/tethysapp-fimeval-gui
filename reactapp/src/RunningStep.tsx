@@ -1,7 +1,50 @@
 // reactapp/src/RunningStep.tsx
 import { useEffect, useState } from 'react';
-import { getJobStatus } from './api';
+import { getJobStatus, type JobInputs } from './api';
 import './RunningStep.css';
+
+function formatMeta(x: { resolution: [number, number] | null; crs: string | null }): string {
+  const parts: string[] = [];
+  if (x.crs) parts.push(x.crs);
+  if (x.resolution) parts.push(`res ${x.resolution[0]}`);
+  return parts.join(' · ');
+}
+
+function InputFiles({ inputs }: { inputs: JobInputs }) {
+  const [open, setOpen] = useState(false);
+  const rows = [
+    { role: 'Benchmark', name: inputs.benchmark.name, meta: formatMeta(inputs.benchmark) },
+    ...inputs.candidates.map((c) => ({
+      role: 'Candidate', name: c.name, meta: formatMeta(c),
+    })),
+    ...(inputs.boundary
+      ? [{ role: 'Boundary', name: inputs.boundary.name, meta: inputs.boundary.crs ?? '' }]
+      : []),
+  ];
+  return (
+    <div className="input-files">
+      <button
+        type="button"
+        className="input-files-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span aria-hidden="true">{open ? '▼' : '▶'}</span> Input Files
+      </button>
+      {open && (
+        <ul className="input-files-list">
+          {rows.map((r, i) => (
+            <li key={i} className="input-files-row">
+              <span className="input-files-role">{r.role}</span>
+              <span className="input-files-name">{r.name}</span>
+              {r.meta && <span className="input-files-meta">{r.meta}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 interface RunningStepProps {
   jobId: number;
@@ -19,6 +62,7 @@ function formatElapsed(ms: number): string {
 function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
   const [errored, setErrored] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
+  const [inputs, setInputs] = useState<JobInputs | null>(null);
   const [phase, setPhase] = useState<'submitted' | 'queued' | 'running'>('submitted');
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -31,6 +75,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
       try {
         const status = await getJobStatus(jobId);
         if (cancelled) return;
+        if (status.inputs) setInputs(status.inputs);
         if (status.status === 'complete') {
           onComplete();
           return;
@@ -99,6 +144,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
           Your job is waiting for an available worker. It will start automatically.
         </p>
         <p className="running-jobid">(Job #{jobId})</p>
+        {inputs && <InputFiles inputs={inputs} />}
       </div>
     );
   }
@@ -115,6 +161,7 @@ function RunningStep({ jobId, onComplete, onReset }: RunningStepProps) {
         </p>
       )}
       <p className="running-jobid">(Job #{jobId})</p>
+      {inputs && <InputFiles inputs={inputs} />}
     </div>
   );
 }

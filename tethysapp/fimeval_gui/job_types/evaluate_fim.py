@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import tempfile
 
@@ -12,7 +13,8 @@ from tethysapp.fimeval_gui.job_types.registry import JobType
 # instead of bailing ("Mixed or non-CONUS CRS detected") when the benchmark and
 # candidate are in different CRSs. Without a target CRS fimeval only
 # auto-reprojects when every input passes its is_within_conus() check.
-TARGET_CRS = 'EPSG:5070'
+# Overridable per deployment (e.g. a non-CONUS region) via env var.
+TARGET_CRS = os.environ.get('FIMEVAL_TARGET_CRS', 'EPSG:5070')
 
 
 def _extract_failure_reason(captured_output: str) -> str:
@@ -138,7 +140,38 @@ def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
         )
 
 
-def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict):
+def _read_raster_crs_res(path):
+    """Return ``{'resolution': [x, y], 'crs': 'EPSG:...'}`` for a raster, or
+    ``None`` values if it can't be read."""
+    import rasterio
+
+    try:
+        with rasterio.open(path) as ds:
+            return {
+                'resolution': [ds.res[0], ds.res[1]],
+                'crs': str(ds.crs) if ds.crs else None,
+            }
+    except Exception:
+        return {'resolution': None, 'crs': None}
+
+
+def _read_vector_crs(shp_path):
+    """Return a shapefile's CRS as ``'EPSG:...'`` (from its ``.prj``), or None."""
+    try:
+        prj = os.path.splitext(shp_path)[0] + '.prj'
+        if os.path.exists(prj):
+            from pyproj import CRS
+
+            crs = CRS.from_wkt(open(prj).read())
+            epsg = crs.to_epsg()
+            return f'EPSG:{epsg}' if epsg else crs.to_string()
+    except Exception:
+        pass
+    return None
+
+
+def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict,
+                          target_resolution=None):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
     Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
@@ -203,6 +236,50 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                     dest = os.path.join(case_dir, os.path.basename(rel))
                 client.download_file(bucket, obj['Key'], dest)
 
+        # Publish input metadata (FE14): map the renamed files back to their
+        # original names (from the presign manifest) and read res/CRS from the
+        # local downloads, so the UI can show which files a run is evaluating.
+        # Written before the (long) evaluation so it's available while running.
+        # Best-effort — never fatal to the run.
+        try:
+            names = json.loads(
+                client.get_object(Bucket=bucket, Key=input_prefix + 'manifest.json')[
+                    'Body'
+                ].read()
+            ).get('names', {})
+        except Exception:
+            names = {}
+
+        def _labelled(fname, path):
+            meta = _read_raster_crs_res(path)
+            meta['name'] = names.get(fname, fname)
+            return meta
+
+        inputs_meta = {
+            'benchmark': _labelled(
+                'benchmark.tif', os.path.join(case_dir, 'benchmark.tif')
+            ),
+            'candidates': [
+                _labelled(f, os.path.join(case_dir, f))
+                for f in sorted(os.listdir(case_dir))
+                if f != 'benchmark.tif' and f.lower().endswith('.tif')
+            ],
+        }
+        if shapefile_path:
+            shp_name = os.path.basename(shapefile_path)
+            inputs_meta['boundary'] = {
+                'name': names.get(shp_name, shp_name),
+                'crs': _read_vector_crs(shapefile_path),
+            }
+        try:
+            client.put_object(
+                Bucket=bucket,
+                Key=output_prefix + 'inputs.json',
+                Body=json.dumps(inputs_meta).encode('utf-8'),
+            )
+        except Exception:
+            pass
+
         # Pre-clip each candidate to the benchmark extent so fimeval doesn't load
         # and reproject the full (possibly 300+ Mpx) candidate (FIMEVAL-BE31).
         # Non-overlapping inputs can't be evaluated — fail fast with a reason in
@@ -230,6 +307,11 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
+        # When the user accepted a downsample at submit (job too large at full
+        # resolution), fimeval resamples every input to this resolution (meters)
+        # so the working set actually fits. None = use the coarsest input res.
+        if target_resolution:
+            extra['target_resolution'] = target_resolution
         # fimeval swallows its own exceptions and only PRINTS them, returning
         # with no EvaluationMetrics.csv. Capture its output so the real cause is
         # preserved (in the _FAILED marker) instead of a generic message.
@@ -284,4 +366,5 @@ class EvaluateFIMJobType(JobType):
             params['user_id'],
             params['method'],
             params['s3_config'],
+            target_resolution=params.get('target_resolution'),
         )
