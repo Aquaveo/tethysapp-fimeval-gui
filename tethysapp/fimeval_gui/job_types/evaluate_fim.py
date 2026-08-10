@@ -79,6 +79,24 @@ def _clip_candidate_to_bounds(candidate_path, bounds, name):
                 pass
 
 
+def _write_contingency_cog(output_dir, client, bucket, output_prefix):
+    """Find fimeval's ContingencyMAP raster and upload a COG copy for tiling
+    (FE15). Best-effort — never fatal to the run."""
+    import glob
+    from rasterio.shutil import copy as rio_copy
+    try:
+        matches = glob.glob(
+            os.path.join(output_dir, '**', 'ContingencyMAP*.tif'), recursive=True
+        )
+        if not matches:
+            return
+        cog_path = os.path.join(os.path.dirname(output_dir), 'contingency.cog.tif')
+        rio_copy(sorted(matches)[0], cog_path, driver='COG')
+        client.upload_file(cog_path, bucket, output_prefix + 'contingency.cog.tif')
+    except Exception as exc:  # noqa: BLE001 — map is additive
+        print(f'FE15: contingency COG write skipped: {exc}')
+
+
 def _clip_candidates_to_benchmark(case_dir, buffer_frac=0.05):
     """Shrink each candidate raster to the benchmark's extent (+ a buffer) so
     fimeval doesn't load and reproject the *full* candidate — a large candidate
@@ -334,6 +352,9 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
                 s3_key = output_prefix + rel_path.replace(os.sep, '/')
                 client.upload_file(full_path, bucket, s3_key)
                 produced.add(fname)
+
+        # Contingency map (FE15): upload a COG copy for the tile endpoints.
+        _write_contingency_cog(output_dir, client, bucket, output_prefix)
 
         # Write a terminal marker LAST, so the status endpoint only reports a
         # terminal state once the full output set is present (no race with

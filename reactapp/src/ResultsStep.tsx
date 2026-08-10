@@ -9,6 +9,7 @@ import {
 } from './api';
 import type { OutputFile, JobMetrics, BootstrapStats } from './api';
 import BootstrapBoxPlots from './BootstrapBoxPlots';
+import ContingencyMap from './ContingencyMap';
 import ErrorBoundary from './ErrorBoundary';
 import './ResultsStep.css';
 
@@ -166,6 +167,8 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
           <BootstrapBoxPlots data={bootstrap} />
         </ErrorBoundary>
       )}
+
+      <ContingencyMap jobId={jobId} />
 
       <div className="results-panel">
         <div className="results-downloadall">

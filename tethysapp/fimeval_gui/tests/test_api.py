@@ -777,6 +777,7 @@ class TestOutputsEndpoint(TethysTestCase):
             'outputs/1/uid1/_SUCCESS',
             'outputs/1/uid1/_RUNNING',
             'outputs/1/uid1/inputs.json',
+            'outputs/1/uid1/contingency.cog.tif',
         ]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -787,6 +788,7 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertNotIn('_SUCCESS', names)
         self.assertNotIn('_RUNNING', names)
         self.assertNotIn('inputs.json', names)  # metadata, not a downloadable output
+        self.assertNotIn('contingency.cog.tif', names)
 
     def test_outputs_returns_files_even_if_status_not_com(self):
         # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence
@@ -1468,3 +1470,116 @@ class TestPresignEndpoint(TethysTestCase):
             content_type='application/json',
         )
         self.assertIn(response.status_code, [302, 403])
+
+
+class TestTileJsonEndpoint(TethysTestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_test_user(username='tj', password='pw', email='t@b.com')
+        self.other = self.create_test_user(username='tj2', password='pw', email='t2@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def _make_job(self, user=None):
+        from tethys_sdk.jobs import DaskJob
+        job = MagicMock(spec=DaskJob)
+        job.id = 77
+        job.user = user if user is not None else self.user
+        job.extended_properties = {'upload_id': 'uid1', 'user_id': '1'}
+        return job
+
+    def _local_cog(self):
+        """Write a tiny EPSG:5070 COG to a temp file; return its path."""
+        import tempfile, numpy as np, rasterio
+        from rasterio.transform import from_origin
+        from rasterio.shutil import copy as rio_copy
+        raw = tempfile.NamedTemporaryFile(suffix='.tif', delete=False).name
+        with rasterio.open(
+            raw, 'w', driver='GTiff', height=64, width=64, count=1, dtype='uint8',
+            crs='EPSG:5070', transform=from_origin(1_600_000, 1_530_000, 10, 10),
+        ) as ds:
+            ds.write(np.full((64, 64), 4, dtype='uint8'), 1)
+        cog = tempfile.NamedTemporaryFile(suffix='.tif', delete=False).name
+        rio_copy(raw, cog, driver='COG')
+        return cog
+
+    def _get(self, job_id):
+        # Tethys always forces a trailing slash onto registered routes (see the
+        # sibling endpoint tests above), so the resolved path is .../tiles.json/.
+        return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles.json/')
+
+    def test_tilejson_returns_bounds_and_template(self):
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(len(body['bounds']), 4)
+        self.assertTrue(body['tiles'][0].endswith('/tiles/{z}/{x}/{y}.png/'))
+        self.assertIn('minzoom', body)
+
+    def test_tilejson_404_when_no_cog(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src',
+                   return_value='/nonexistent/x.tif'):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 404)
+
+    def test_tilejson_403_for_other_users_job(self):
+        job = self._make_job(user=self.other)
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ:
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 403)
+
+    def test_tilejson_template_resolves_to_tile_endpoint(self):
+        # End-to-end consistency: the tile URL template the frontend receives
+        # must resolve directly to the tile endpoint (200), not a redirect or
+        # 404, so MapLibre never has to follow a per-tile 301.
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            tilejson_response = self._get(77)
+            template = json.loads(tilejson_response.content)['tiles'][0]
+            tile_url = template.replace('{z}/{x}/{y}', '0/0/0')
+            response = self.client.get(tile_url)
+        self.assertEqual(response.status_code, 200)
+
+    def _get_tile(self, job_id, z, x, y):
+        return self.client.get(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/{z}/{x}/{y}.png/')
+
+    def test_tile_in_bounds_returns_png(self):
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 0, 0, 0)  # z0 world tile always intersects
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertTrue(response.content[:8] == b'\x89PNG\r\n\x1a\n')
+
+    def test_tile_out_of_bounds_returns_204(self):
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 12, 0, 0)  # far from CONUS
+        self.assertEqual(response.status_code, 204)
+
+    def test_tile_404_when_no_cog(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src',
+                   return_value='/nonexistent/x.tif'):
+            MockDJ.objects.get.return_value = job
+            response = self._get_tile(77, 0, 0, 0)
+        self.assertEqual(response.status_code, 404)

@@ -470,3 +470,37 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         # Both markers present; terminal wins at the status endpoint (Task 3).
         self.assertTrue(any(k.endswith('/_RUNNING') for k in keys), keys)
         self.assertTrue(any(k.endswith('/_FAILED') for k in keys), keys)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_writes_contingency_cog(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+        def fake_eval(main_dir, method, output_dir, **kwargs):
+            import numpy as np, rasterio
+            from rasterio.transform import from_origin
+            cmap_dir = os.path.join(output_dir, 'case_study', method, 'ContingencyMaps')
+            os.makedirs(cmap_dir, exist_ok=True)
+            with rasterio.open(
+                os.path.join(cmap_dir, 'ContingencyMAP_candidate_0.tif'), 'w',
+                driver='GTiff', height=32, width=32, count=1, dtype='uint8',
+                crs='EPSG:5070', transform=from_origin(1000, 2000, 10, 10),
+            ) as ds:
+                ds.write(np.full((32, 32), 4, dtype='uint8'), 1)  # all-TP
+            _emit_success_outputs(output_dir)
+
+        mock_eval.side_effect = fake_eval
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG)
+
+        # A COG copy is uploaded and is a readable geospatial raster.
+        import tempfile, rasterio
+        with tempfile.NamedTemporaryFile(suffix='.tif') as tmp:
+            s3.download_file(BUCKET, 'outputs/1/abc/contingency.cog.tif', tmp.name)
+            with rasterio.open(tmp.name) as ds:
+                self.assertEqual((ds.width, ds.height), (32, 32))
+                self.assertEqual(str(ds.crs), 'EPSG:5070')
