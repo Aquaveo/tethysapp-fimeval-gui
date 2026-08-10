@@ -315,3 +315,26 @@ export async function fetchTileJson(jobId: number): Promise<TileJson> {
   if (!response.ok) throw new Error(`no tilejson (HTTP ${response.status})`);
   return response.json();
 }
+
+export interface Basemap {
+  key: string;
+  label: string;
+  url: string;
+  attribution: string;
+}
+
+export interface BasemapConfig {
+  layers: Basemap[];
+  default: string;
+}
+
+// The basemap layers the contingency-map viewer may show, resolved from the
+// `basemap_layers` custom setting. Callers fall back to a built-in default if
+// this fails, so the map still renders.
+export async function fetchBasemaps(): Promise<BasemapConfig> {
+  const response = await fetch(`${API_BASE}/basemaps/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) throw new Error(`no basemaps (HTTP ${response.status})`);
+  return response.json();
+}

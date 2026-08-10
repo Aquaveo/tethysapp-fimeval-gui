@@ -4,12 +4,14 @@ import {
   getJobOutputs,
   getJobMetrics,
   getBootstrapDistribution,
+  getJobStatus,
   downloadUrl,
   downloadAllUrl,
 } from './api';
-import type { OutputFile, JobMetrics, BootstrapStats } from './api';
+import type { OutputFile, JobMetrics, BootstrapStats, JobInputs } from './api';
 import BootstrapBoxPlots from './BootstrapBoxPlots';
 import ContingencyMap from './ContingencyMap';
+import InputFiles from './InputFiles';
 import ErrorBoundary from './ErrorBoundary';
 import './ResultsStep.css';
 
@@ -30,6 +32,7 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [metrics, setMetrics] = useState<JobMetrics | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapStats | null>(null);
+  const [inputs, setInputs] = useState<JobInputs | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +56,14 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
           if (!cancelled) setBootstrap(b);
         } catch {
           if (!cancelled) setBootstrap(null);
+        }
+        try {
+          // Input metadata (names · resolution · CRS) the worker published, so
+          // the results view can show what the run evaluated (FE22). Best-effort.
+          const s = await getJobStatus(jobId);
+          if (!cancelled) setInputs(s.inputs ?? null);
+        } catch {
+          if (!cancelled) setInputs(null);
         }
         if (!cancelled) setPhase('ready');
       } catch {
@@ -117,6 +128,29 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
         </p>
       </header>
 
+      {/* What the run evaluated — benchmark / candidate(s) / boundary (FE22). */}
+      {inputs && <InputFiles inputs={inputs} />}
+
+      {/* Contingency map is the first output shown (FE21): the visual result of
+          the evaluation, above the numbers. Renders nothing when the job has no
+          contingency COG (e.g. an older run), so non-map jobs see no gap. */}
+      <ContingencyMap jobId={jobId} />
+
+      {/* Second: the primary analytical output — box plots for a bootstrap run,
+          the metrics table for every other method. (A bootstrap run still shows
+          the metrics table below, as supplementary detail.) */}
+      {bootstrap && bootstrap.candidates.length > 0 && (
+        <ErrorBoundary
+          fallback={
+            <div className="results-panel results-panel-title">
+              Could not render the bootstrap distribution chart.
+            </div>
+          }
+        >
+          <BootstrapBoxPlots data={bootstrap} />
+        </ErrorBoundary>
+      )}
+
       {headline.length > 0 && (
         <div className="results-cards">
           {headline.map((h) => (
@@ -155,20 +189,6 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
           </table>
         </div>
       )}
-
-      {bootstrap && bootstrap.candidates.length > 0 && (
-        <ErrorBoundary
-          fallback={
-            <div className="results-panel results-panel-title">
-              Could not render the bootstrap distribution chart.
-            </div>
-          }
-        >
-          <BootstrapBoxPlots data={bootstrap} />
-        </ErrorBoundary>
-      )}
-
-      <ContingencyMap jobId={jobId} />
 
       <div className="results-panel">
         <div className="results-downloadall">
