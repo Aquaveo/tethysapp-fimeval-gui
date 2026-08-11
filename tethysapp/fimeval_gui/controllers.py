@@ -457,7 +457,11 @@ def api_jobs_submit(request):
     Validates the method and that the upload exists (and, for AOI, that a ``.shp``
     is present), then creates and executes a DaskJob. Returns ``{job_id, status}``
     (202). 400 on bad input, 404 unknown upload, 503 if storage/scheduler is down.
+
+    GET lists the requesting user's jobs (for the Runs list) — see ``_list_user_jobs``.
     """
+    if request.method == 'GET':
+        return _list_user_jobs(request)
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -601,6 +605,37 @@ _TETHYS_TO_STATUS = {
     'ABT': 'error',
     'VAR': 'running',
 }
+
+
+def _list_user_jobs(request):
+    """GET ``api/jobs``: the requesting user's evaluations, newest first, for the
+    Runs list. A read over the persisted Tethys ``DaskJob`` records — filtered to
+    ``request.user`` (with a belt-and-suspenders ownership check so another user's
+    jobs can never leak)."""
+    try:
+        jobs = App.get_job_manager().list_jobs(user=request.user)
+    except TypeError:
+        # Older job-manager signature without a user filter — filter below.
+        jobs = App.get_job_manager().list_jobs()
+    except Exception as exc:
+        logger.error('list_jobs failed: %s', exc)
+        return JsonResponse({'error': 'could not list jobs'}, status=503)
+
+    out = []
+    for j in jobs:
+        if getattr(j, 'user', None) != request.user:
+            continue
+        props = j.extended_properties or {}
+        created = getattr(j, 'creation_time', None)
+        out.append({
+            'job_id': j.id,
+            'method': props.get('method'),
+            'status': _TETHYS_TO_STATUS.get(getattr(j, '_status', None), 'submitted'),
+            'created': created.isoformat() if created else None,
+            'upload_id': props.get('upload_id'),
+        })
+    out.sort(key=lambda r: r['job_id'], reverse=True)
+    return JsonResponse({'jobs': out})
 
 # A running job that never reaches a terminal state — e.g. a worker OOM-killed
 # mid-task that never wrote a _FAILED marker, or one stuck in a restart loop —
