@@ -151,6 +151,24 @@ Out of Scope
 
 Notes: Shipped — `d238699`.
 
+### FIMEVAL-BE34 — List a user's runs (`GET api/jobs`)
+
+Description: The workspace's Runs list needs the user's past and in-progress evaluations,
+but the app only has `POST api/jobs` (submit) — no way to enumerate jobs. Tethys already
+persists a `DaskJob` record per user, so this is a read over existing data.
+
+[  ]  `GET api/jobs` returns the caller's jobs — `[{job_id, method, status, created, upload_id}]`, newest first
+[  ]  Per-user isolated (`request.user`); another user's jobs never appear
+[  ]  `status` uses the same vocabulary as the status endpoint (submitted/queued/running/complete/error)
+[  ]  `POST api/jobs` unchanged; TDD (moto/Tethys): only-my-jobs, ordering, ownership, empty list
+
+Out of Scope
+- Pagination/filtering (the list is small for v1)
+- Retention/cleanup (BE26)
+
+Notes: New (Workspace UI overhaul). Delivers the backend half of FE17. Provisional number —
+BE34 was loosely earmarked for the folder-rename backend (FE25); confirm on the board.
+
 ---
 
 ## Frontend
@@ -330,3 +348,103 @@ Out of Scope
 
 Notes: Shipped — but built under the wrong number: commit `597476f` reads `FIMEVAL-FE14`.
 **Reassigned to FE26 on 2026-08-06** (FE14 = the tracker's validation ticket). Depends on BE30.
+
+---
+
+## Workspace UI Overhaul (new — not started)
+
+Single-page workspace replacing the pop-up flow: FIM-family chrome, a persistent Runs
+list, a detail pane, and a guided New-Evaluation wizard. Spec + plan (local, gitignored):
+`docs/superpowers/{specs,plans}/2026-08-11-workspace-ui-overhaul*`. Base branch
+`feat/map-ux`. See BE34 above for the backend endpoint.
+
+### FIMEVAL-FE27 — Workspace shell: single-page layout, routing & FIM chrome
+
+Description: Replace the pop-up run flow with a single-page workspace. Add client-side
+routing (`react-router-dom`, as FIMbench uses) and an `AppShell` — FIM-family header +
+footer + theme, a left nav, a persistent Runs-list column, and a detail pane.
+
+[  ]  `react-router-dom` added; routes `/new`, `/runs/:jobId`, `/docs` (`/` redirects)
+[  ]  `AppShell` renders header + nav + Runs-list slot + detail `<Outlet/>` + footer, fixed full-height
+[  ]  Header/footer/theme match FIMbench (navy chrome, partner-logo footer, cyan accent), titled "FIMeval" + tagline; light + dark
+[  ]  No `window.open` anywhere in the new shell
+
+Out of Scope
+- Runs-list contents (FE28), wizard (FE29), detail pane (FE30)
+
+Notes: New. Combo layout agreed via mockup. Plan Tasks 3–4.
+
+### FIMEVAL-FE28 — Persistent Runs list
+
+Description: A pinned Runs column beside the detail pane lists the user's runs and lets them
+jump between results without losing the list. Backed by BE34.
+
+[  ]  `fetchJobs()` data layer + `Job` type in `api.ts`
+[  ]  Runs column renders run cards (# · method · status pill · candidates · relative time); click routes to `/runs/:jobId`; selected highlights
+[  ]  In-progress rows poll and refresh status live; polling stops when none are active
+[  ]  Non-blocking error state if the list can't load (New Evaluation still works)
+
+Out of Scope
+- Infinite scroll / search
+
+Notes: New. Delivers the FE17 job-history UI. Plan Tasks 2 + 5. Depends on BE34.
+
+### FIMEVAL-FE29 — New Evaluation wizard
+
+Description: Creating a run becomes a guided 3-step wizard in the detail pane (no pop-up):
+① Upload → ② Method → ③ Run. Reuses the existing presign → upload → submit path, so the
+BE33 guard + FE24 downsample modal come along.
+
+[  ]  3-step wizard (Upload / Method / Run) with Back/Next in the detail pane
+[  ]  "Run evaluation" runs presign → `putFile` → `submitJob(upload_id, method)`; on success routes to `/runs/:jobId`
+[  ]  The FE24 too-large modal surfaces at step 3 when the guard fires (Accept → downsample resubmit)
+[  ]  `window.open` removed; the new run lands atop the Runs list and auto-opens
+
+Out of Scope
+- Advanced evaluation parameters (FE18)
+
+Notes: New. Reworks today's `UploadStep`. Plan Task 6.
+
+### FIMEVAL-FE30 — Run detail pane
+
+Description: Selecting a run shows its detail in the pane, by status: queued/running → live
+progress; error → the captured reason (BE27) + Re-run; complete → the existing results
+(map-first per FE21, box-plot, metrics, Input Files).
+
+[  ]  `/runs/:jobId` polls status and renders by state (running / error / complete)
+[  ]  Reuses `ContingencyMap`, `BootstrapBoxPlots`, `InputFiles`, and the FE21 results order
+[  ]  Error state shows the failure reason + a Re-run action
+[  ]  A completed run auto-opens after submission
+
+Out of Scope
+- Re-run / Export mechanics (FE31)
+
+Notes: New. Plan Task 7.
+
+### FIMEVAL-FE31 — Re-run & downloads
+
+Description: From a run's detail, let users re-run it with one click and download the
+outputs. Re-run resubmits the stored `upload_id + method` (inputs persist) — no re-upload.
+
+[  ]  Re-run button (error + completed states) → `submitJob(upload_id, method)` → routes to the new run; guard/modal reused
+[  ]  Download the box-plot as PNG (from the ECharts instance)
+[  ]  Download the contingency map (GeoTIFF) and the all-results zip
+
+Out of Scope
+- Batch re-run / export-all
+
+Notes: New. The "restart on error" boss ask. Plan Task 8.
+
+### FIMEVAL-FE32 — Retire the pop-up flow + polish
+
+Description: Remove the old Stepper/pop-up machinery now that everything lives in the
+workspace, and do a responsive + accessibility + light/dark polish pass.
+
+[  ]  `Stepper.tsx` and the pop-up/stepper code removed; no dead paths; no `window.open` remains
+[  ]  Responsive (nav + Runs list collapse), visible keyboard focus, light/dark verified
+[  ]  `tsc` + `lint` + `build` clean; manual script (create → auto-open → open past run → re-run error → downloads → no pop-ups) passes
+
+Out of Scope
+- Effort 3 (retention/cleanup — BE26)
+
+Notes: New. Plan Task 9.
