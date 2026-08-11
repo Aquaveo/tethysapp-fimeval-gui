@@ -1,373 +1,332 @@
 # FIMeval GUI — Ticket Backlog
 
-Full ticket bodies for the reliability and GUI-expansion work. One-line summaries
-and status live in [`../ROADMAP.md`](../ROADMAP.md).
+Ticket bodies for the reliability and GUI-expansion work, in Scrum-ready format.
+One-line summaries and status live in [`../ROADMAP.md`](../ROADMAP.md).
 
-**Dependency notes:** FE14 depends on BE30; the rest are independent.
-Worst-case estimates in dev-days.
-
----
-
-## Reliability & Observability
-
-### FIMEVAL-BE27 — Surface fimeval failure cause instead of a generic "Evaluation failed"
-
-**Type:** Bug / Observability · **Priority:** High · **Est:** ~1.5 d
-
-**Context**
-When a fimeval evaluation fails, users see only a generic "Evaluation failed" with
-no cause. Two compounding layers hide the real error:
-
-1. `fimeval.EvaluateFIM` **swallows its own exceptions** — on failure it
-   `print()`s `Error evaluating …` / `Error processing folder …` and returns
-   *without* raising and without writing `EvaluationMetrics.csv`
-   (`evaluationFIM.py`). Our worker (`job_types/evaluate_fim.py`) only observes
-   "no CSV" → writes a bare `_FAILED` marker + raises a generic `RuntimeError`.
-2. The worker's **stdout is block-buffered** (writes to a pipe, not a TTY), so even
-   that printed error is invisible until the worker process exits — confirmed
-   2026-07-29: all fimeval output appeared only when the worker was killed. On
-   2026-07-28, four real failures (`Too many points (1296/1296) failed to
-   transform, unable to compute output bounds`) were printed but never surfaced.
-
-**Scope** *(our code only — do NOT modify the fimeval library)*
-- In `run_evaluate_fim_task` (`tethysapp/fimeval_gui/job_types/evaluate_fim.py`),
-  wrap the `EvaluateFIM(...)` call in `contextlib.redirect_stdout`/`redirect_stderr`
-  to capture fimeval's output. (Technique proven in the 2026-07 investigation.)
-- On failure (no `EvaluationMetrics.csv`), write the captured text — or at minimum
-  the extracted `Error evaluating` / `Error processing` line — into the `_FAILED`
-  marker object body (currently empty) and into the job-status error payload
-  returned by `api_job_status`.
-- Surface a short, non-generic reason in the UI failure state (`RunningStep.tsx`)
-  instead of "The evaluation failed."
-- Set `PYTHONUNBUFFERED=1` (or `python -u`) in `scripts/start_worker.sh` so worker
-  logs stream live during ops/debugging.
-
-**Acceptance criteria**
-- A deliberately-failing evaluation records a `_FAILED` marker whose body contains
-  the actual fimeval error text.
-- `GET api/jobs/{id}` for a failed job returns that reason; the UI shows it.
-- Worker logs flush in real time (no need to kill the worker to see fimeval output).
-- No changes to the `fimeval` package.
-
-**Notes:** does not change success behavior; purely makes failures diagnosable.
+**⚠ Ticket numbers:** the issue tracker is the source of truth for numbers; the
+authoritative local mirror is Claude's `reference_ticket_registry.md`. Do not invent
+new numbers — pull the next free one from the tracker (see CLAUDE.md). Known
+collisions resolved 2026-08-06: **FE14** = the tracker's "Run Intersected Extent & AOI
+(validation)" ticket (so the Input-Files disclosure moved to **FE26**); **BE19** =
+"Accept Candidates on Existing upload_id" (so "Bounded Dask Worker Pool" moved to **BE32**).
 
 ---
+
+## Reliability & Backend
+
+### FIMEVAL-BE26 — Output retention & cleanup policy
+
+Description: `uploads/` and `outputs/` grow unbounded in MinIO — no lifecycle, so every
+run's inputs and artifacts persist forever. Add a retention policy that reclaims storage
+without breaking re-run or recent-results access.
+
+[  ]  Inputs (`uploads/<user_id>/<upload_id>/`) removed after a successful run, with a grace window so re-run still works for a configurable period
+[  ]  Outputs expire after a configurable N days (MinIO lifecycle rule or scheduled sweep)
+[  ]  Failed-job inputs retained long enough to diagnose / re-run
+[  ]  Retention window(s) configurable via env var; documented in the hardening notes
+
+Out of Scope
+- Per-user storage quotas (separate ticket)
+- Any UI for browsing/managing stored artifacts
+
+Notes: Drafted only; NOT started. Feeds the "Effort 3" retention piece of the workspace overhaul.
+
+### FIMEVAL-BE27 — Surface fimeval failure cause
+
+Description: Failed evaluations show a generic "Evaluation failed." `fimeval.EvaluateFIM`
+swallows its own exceptions (prints `Error evaluating…`, returns no `EvaluationMetrics.csv`),
+and the worker's stdout is block-buffered so even that print is invisible until the process
+exits. Capture fimeval's output and surface a real reason.
+
+[  ]  Worker wraps `EvaluateFIM` in `redirect_stdout`/`redirect_stderr` and writes the captured cause into the `_FAILED` marker body
+[  ]  `GET api/jobs/{id}` returns that reason; the UI shows it instead of "The evaluation failed"
+[  ]  `PYTHONUNBUFFERED=1` in the worker so logs stream live
+[  ]  No changes to the `fimeval` package
+
+Out of Scope
+- Changing any success-path behavior
+
+Notes: Shipped — `fde55d6`.
 
 ### FIMEVAL-BE28 — Disable PROJ network grids in the worker (`PROJ_NETWORK=OFF`)
 
-**Type:** Hardening · **Priority:** Medium · **Est:** ~0.5 d
+Description: A transient `1296/1296 points failed to transform` failure was traced to
+`PROJ_NETWORK=ON` (env default): PROJ reaches a CDN for datum-shift grid metadata, which
+can fail under load. The relevant transforms resolve fully offline, so the dependency is
+unnecessary.
 
-**Context**
-The 2026-07-28 failures (`1296/1296 points failed to transform`) were transient and
-unreproducible across six strategies (direct, thread, fork, real Dask workers ×
-concurrency, cold PROJ cache, network on/off); a 2026-07-29 retest passed 7/7. The
-best-fit trigger is `PROJ_NETWORK=ON` (default in this env): PROJ reaches a CDN for
-datum-shift grid metadata, which can fail transiently under load. Verified the
-relevant transforms (EPSG:32618→5070, 5070→5070) need **no** downloadable grid —
-they resolve fully offline (0 unavailable operations).
+[  ]  `PROJ_NETWORK=OFF` exported in `scripts/start_worker.sh` before `exec dask worker …`
+[  ]  Verified on a running worker (`/proc/<pid>/environ`)
+[  ]  Full evaluation of all five methods still succeeds — no transform regression
+[  ]  Rationale documented in the worker-sizing guide / README
 
-**Scope**
-- Set `PROJ_NETWORK=OFF` in the worker environment via `scripts/start_worker.sh`
-  (export before `exec dask worker …`).
-- Document in `worker-sizing-guide.md` / README why (removes a network dependency
-  the transforms don't need; eliminates this transient failure class).
+Out of Scope
+- (none)
 
-**Acceptance criteria**
-- Worker processes run with `PROJ_NETWORK=OFF` (verify via `/proc/<pid>/environ`).
-- A full evaluation of each method (smallest_extent, convex_hull,
-  intersected_extent, bootstrap, AOI) still succeeds — no transform regression.
+Notes: Shipped — `3d8b121`. Pairs with BE27.
 
-**Notes:** low-risk; pairs with BE27 (if a transform ever *does* need a grid, BE27
-makes that failure visible).
+### FIMEVAL-BE29 — OOM-killed jobs hang the UI + input guard
 
----
+Description: A user set the same 0.5 m raster as both benchmark and candidate;
+`MakeFIMsUniform` resamples to the coarsest resolution, so two full-res arrays exceeded the
+worker budget → the nanny OOM-killed and restarted the worker → the task was cancelled
+without writing a `_FAILED` marker → the status endpoint never reported `error` → the UI
+polled for 5+ minutes. Fail fast and cleanly, and guard the common accident.
 
-### FIMEVAL-BE29 — Jobs that OOM-kill the worker hang the UI until timeout (+ input guard)
+[  ]  OOM-killed / lost / cancelled tasks reach a terminal `error` in the UI within a bounded time, with an actionable message
+[  ]  Dask task retries bounded (no restart loop)
+[  ]  Server-side wall-clock job timeout marks stuck jobs `error`; status endpoint degrades to the stored marker instead of throwing
+[  ]  Pre-submit input guard rejects a job whose working set exceeds the budget
+[  ]  Legitimate large jobs that fit the budget still run
 
-**Type:** Bug / Reliability · **Priority:** High · **Est:** ~4 d
+Out of Scope
+- (none)
 
-**Context**
-Found in live demo 2026-07-29: a user set the **same benchmark raster as both
-benchmark and candidate**. Confirmed inputs (upload `69f49c5c`): `benchmark.tif`
-= 390 MiB, `candidate_0.tif` = 390 MiB (the same 0.5 m raster,
-40885×39527 ≈ 1.6 Gpixels). The request hung 5+ min with no result.
+Notes: Shipped (three slices). The guard's estimate was later corrected by BE33.
 
-Root cause (evidence-confirmed): `MakeFIMsUniform` resamples all inputs to the
-**coarsest** resolution present. Normally a coarser candidate downsamples a fine
-benchmark (a run with the same 390 MiB benchmark + a 909 KiB coarse candidate
-succeeded). With **two 0.5 m inputs**, coarsest = 0.5 m → nothing downsamples →
-two full-res arrays exceed the 6 GB worker budget → the nanny OOM-kills and
-restarts the worker → the task is **cancelled and never writes a `_FAILED`
-marker** (output dir left with only `_RUNNING`) → `api_job_status` never reports
-`error` (its Dask `Future(key).status` call times out) → the frontend polls
-indefinitely.
+### FIMEVAL-BE30 — Persist & expose input metadata (names, resolution, CRS)
 
-The bounded pool worked as designed (contained the blast — the host never OOM'd).
-This ticket is about **failing fast and cleanly**. Note: BE27 does *not* cover this
-— the worker dies before it can capture/print anything.
+Description: Original filenames are discarded at upload (renamed to `benchmark.tif` /
+`candidate_i.tif`), and the job persists only `{upload_id, user_id, method}`. Capture names
++ resolution + CRS at submit and expose them.
 
-**Scope**
-- **(a) Terminal state on worker death.** Make an OOM-killed / lost / cancelled task
-  resolve to a terminal `error` quickly instead of hanging:
-  - Bound Dask task retries so a memory-killed task isn't silently resubmitted into
-    a restart loop.
-  - Add a server-side wall-clock job timeout; on exceed, mark the job `error`.
-  - In `api_job_status`, treat `lost`/`cancelled`/unreachable-future (after retries)
-    as terminal `error`, and harden the 5 s Dask client call so it degrades to the
-    stored status instead of throwing.
-  - Surface a clear reason in the UI ("Evaluation ran out of memory / did not
-    complete") rather than an endless spinner.
-- **(b) Input guard (prevent the common accident).** Before submitting:
-  - Reject (or warn) when a candidate is byte-identical to the benchmark.
-  - Estimate the post-uniformization pixel budget (coarsest res × combined extent)
-    and reject with a clear "inputs too large / too high-resolution for the worker
-    memory limit — downsample or raise `FIMEVAL_WORKER_MEMORY`" message, linking
-    `worker-sizing-guide.md`.
+[  ]  Original filenames persisted (carried from presign via a `manifest.json`)
+[  ]  Each raster's resolution + CRS read from its GeoTIFF header; AOI boundary CRS from its `.prj`
+[  ]  `GET api/jobs/{id}` returns an `inputs` object: `benchmark`, `candidates[]`, optional `boundary` — each with name/resolution/CRS
+[  ]  Present while the job is still Queued; header reads add no material latency
 
-**Acceptance criteria**
-- Submitting benchmark-as-candidate (or any job that OOM-kills the worker) reaches
-  a terminal **error** in the UI within a bounded time (no 5-min hang), with an
-  actionable message.
-- A memory-killed task is not resubmitted into an infinite restart loop.
-- The input guard blocks the identical benchmark/candidate case pre-submit with a
-  clear message.
-- Legitimate large jobs that fit the budget still run.
+Out of Scope
+- Any change to evaluation behavior
 
----
+Notes: Shipped — `365530c`. Blocks FE26.
 
-### FIMEVAL-BE30 — Persist + expose evaluation input metadata (names, resolution, CRS)
+### FIMEVAL-BE31 — Pre-clip candidate to the benchmark extent
 
-**Type:** Backend / Feature · **Priority:** Medium *(blocks FE14)* · **Est:** ~2 d
+Description: A large candidate raster is fully loaded and reprojected before fimeval clips
+anything, blowing the worker memory budget. Clip each candidate to the benchmark's extent
+(plus a small buffer) in the worker before `EvaluateFIM`. Metric-safe: an evaluation only
+ever covers benchmark ∩ candidate.
 
-**Context**
-Original filenames are discarded at upload (renamed to `benchmark.tif` /
-`candidate_i.tif`), and the job persists only `{upload_id, user_id, method}`. No
-input metadata is available to the frontend. FE14 needs names + resolution + CRS
-**while the job is Queued/Running**, so it must be captured at submit — not by the
-worker.
+[  ]  Each candidate clipped to the benchmark extent (+buffer) before fimeval; metrics identical to the unclipped run
+[  ]  Worker peak memory materially reduced (live-validated 4638 MB → 542 MB, ~8.5×, identical CSI)
+[  ]  A non-overlapping candidate is dropped and the run continues on the valid ones; the job fails only if *no* candidate overlaps
+[  ]  Clip preserves dtype / CRS / nodata / band tags / colormap
 
-**Scope**
-- At submit, **persist original filenames** (benchmark + candidates) — carry through
-  from the presign step via a `manifest.json` under the upload prefix, or re-send at
-  submit.
-- Read each raster's **resolution + CRS** from its GeoTIFF header in storage (few-KB
-  header range read via `/vsis3` or a boto3 range GET — no full download).
-- **AOI:** read the boundary `.shp` **CRS** from its `.prj`, list the bundle
-  components (+ geometry type / feature count if easy).
-- Persist per-input `{name, resolution, crs}` (job `extended_properties` or the
-  manifest).
-- **Expose via `api_job_status`** as an `inputs` object:
-  `{ benchmark:{name,resolution,crs}, candidates:[…], boundary?:{name,crs,…} }`.
+Out of Scope
+- Reprojection/CRS reconciliation (fimeval handles that)
 
-**Acceptance criteria**
-- `GET api/jobs/{id}` returns an `inputs` object: benchmark + candidates with
-  name/resolution/CRS; AOI jobs also include `boundary` (name/CRS).
-- Present while the job is still **Queued** (computed at submit, before the worker
-  runs).
-- Header reads add no material submit latency (range reads only, no full download).
-- No change to evaluation behavior.
+Notes: Shipped — `3c8bae5` (+ review `e8693d1`).
+
+### FIMEVAL-BE32 — Bounded Dask worker pool
+
+Description: One worker handling one heavy job at a time serializes throughput, and with no
+per-task memory cap, concurrent heavy jobs can OOM each other. Run a bounded, process-based
+worker pool with per-worker memory limits, and report queued status when full.
+
+[  ]  Configurable pool via `start_worker.sh` (`--nworkers` / `--nthreads` + per-worker memory limit)
+[  ]  Concurrency bounded; excess jobs queue and report status `queued`
+[  ]  Per-worker memory cap contains the blast radius so heavy jobs don't OOM each other or the host
+[  ]  Worker-sizing guide documents how to size the pool
+
+Out of Scope
+- Autoscaling / dynamic pool resizing
+- Cross-user fairness (see BE25 priority/round-robin)
+
+Notes: Shipped. **Renumbered to BE32 on 2026-08-06** (originally collided at BE19).
+
+### FIMEVAL-BE33 — Estimate post-uniformization working set + offer downsample
+
+Description: The BE29 guard rejected jobs on the benchmark's *raw* pixel count, so a
+fine-resolution Tier_1 benchmark was refused even though fimeval downsamples every input to
+the coarsest input resolution first (the "Tier_1 rejected" bug). Estimate what fimeval will
+actually process, and offer a downsample path instead of a hard reject.
+
+[  ]  Guard estimates the working set as benchmark ∩ candidate overlap area ÷ coarsest input resolution² (max over candidates), not raw benchmark pixels
+[  ]  A coarsenable Tier_1 raster passes; a genuinely-too-large job is still caught
+[  ]  Rejection message exposes no worker-memory internals to the user
+[  ]  `downsample: true` resubmit threads a computed fit `target_resolution` through to `EvaluateFIM`
+
+Out of Scope
+- A manual per-input resolution control (that's the eval-params panel, FE18)
+
+Notes: Shipped — `d238699`.
 
 ---
 
-### FIMEVAL-BE31 — Pre-clip candidate raster to the evaluation extent before running fimeval
-
-**Type:** Backend / Performance & Reliability · **Priority:** High · **Est:** ~2–3 d
-
-**Context**
-The 2026-07-30 client demo (2/10 failed + 1 hung) traced to **one root cause**: huge
-candidate rasters (**300–377 Mpixels**, ~232 km-wide EPSG:5070) paired with small
-benchmarks (4–19 Mpx). fimeval loads and reprojects the **entire** candidate before
-clipping — ~1.2–1.5 GB *per array* — so under 2-way concurrency the pool blows past
-the 6 GB worker budget. Three faces of the same problem:
-
-- **Hung job** (377 Mpx candidate): OOM-kill → Dask resubmit → OOM again → **loop,
-  never terminal** = "still running forever."
-- **intersected_extent + AOI** (304 Mpx candidates): mode-B "no CSV" failures —
-  **both reproduce as clean successes standalone** (ample RAM). So the inputs are
-  fine; they failed only under memory pressure. Same recurring transient as 07-28,
-  now clearly memory-driven.
-
-The evaluation only ever needs the **overlap** (within the benchmark extent, or the
-AOI boundary) — the other ~95 % of that 232 km candidate is loaded and reprojected
-for nothing.
-
-**Scope** *(our worker — do NOT modify fimeval)*
-- In `run_evaluate_fim_task`, after download and **before** calling `EvaluateFIM`,
-  **pre-clip each candidate** to the benchmark's bounding box (plus a small buffer;
-  for AOI, use the boundary extent) via a **windowed/warped read** (rasterio),
-  writing a small clipped candidate into the case-study dir in place of the full one.
-- Handle **CRS mismatch**: reproject the benchmark/AOI bbox into the candidate's CRS
-  to compute the read window (e.g. benchmark 32618 vs candidate 5070).
-- **No-overlap guard**: if the benchmark and candidate don't intersect, fail fast
-  with a clear message (feeds BE27/BE29).
-
-**Acceptance criteria**
-- A job with a 300+ Mpx candidate + small benchmark runs on the clipped candidate;
-  **peak worker memory stays well under the limit**, and it no longer OOMs under
-  2-way concurrency.
-- **Metrics are equivalent** to the un-clipped result (clipping to ⊇ the eval region
-  must not change overlap-based metrics) — verify explicitly with a buffer margin.
-- Noticeably faster (no full-candidate reproject).
-- No-overlap inputs fail fast with a clear reason.
-
-**Notes:** This is the fix that lets these **legitimate large jobs succeed**,
-complementing BE29 (predictability — no hangs/clean errors) and BE27 (visibility).
-It targets the actual memory driver rather than just rejecting big inputs.
-
----
-
-## GUI
-
-### FIMEVAL-FE14 — "Input Files" disclosure in the run window
-
-**Type:** Frontend / Feature · **Priority:** Medium · **Est:** ~1 d · **Depends on:** BE30
-
-**Context**
-Boss request (2026-07-30): while a job is queued/running, users can't see which
-files that run is evaluating. Each run opens in its own pop-up window, and the
-original filenames are only visible in the upload window.
-
-**Scope** — in `RunningStep` (the Queued/Running pop-up), add an **`Input Files ▶`**
-disclosure **below the status line**: `▶`/`▼` toggle, collapsed by default,
-keyboard-accessible. Render each input from `api_job_status`'s `inputs` as
-`filename · resolution · CRS`; for AOI, add a boundary row (shapefile name + CRS).
-Style-consistent; degrades gracefully on missing fields.
-
-**Acceptance criteria**
-- `Input Files ▶` appears below Queued/Running; clicking toggles `▶`/`▼` and
-  shows/hides the box.
-- Every raster shows name + resolution + CRS; AOI also shows boundary shapefile
-  name + CRS.
-- Works before completion (Queued/Running); non-AOI shows no empty boundary section.
-
----
+## Frontend
 
 ### FIMEVAL-FE15 — Interactive contingency map viewer
 
-**Type:** Feature *(FE + BE)* · **Priority:** High *(= roadmap "Version A")* · **Est:** ~5–6 d
+Description: The results view reported metrics numerically but had no spatial visualization.
+Serve the contingency raster as web-map tiles (worker writes a COG; rio-tiler tile endpoints)
+and render it on a MapLibre map with a TP/FP/FN/TN legend.
 
-**Context**
-The results view (Version B) reports metrics numerically but has **no spatial
-visualization** — and the app currently has no map component at all. The product
-vision is explicitly "explore results: **contingency maps**." Every non-trivial
-method produces a **confusion/contingency raster** (TP/FP/FN/TN classes; seen as
-`Confusion raster unique values [0 1 2 3 4 5]`) plus clipped benchmark/candidate
-rasters in the outputs.
+[  ]  Worker writes a `contingency.cog.tif`; backend serves `tiles.json` + PNG tile endpoints (per-user/job scoped)
+[  ]  Results view shows an interactive pan/zoom map of the contingency raster with a class legend
+[  ]  Colors correctly distinguish TP/FP/FN/TN; map fits the data extent
+[  ]  Additive — degrades gracefully (panel hidden) when no contingency raster is present
 
-**Scope — Backend**
-- Serve the contingency GeoTIFF as web-mappable tiles: convert to **COG** (a
-  COG-conversion script already exists in `scripts/`) and expose a raster
-  tile/serve endpoint, following the existing `tile_proxy` controller pattern used
-  for catalog MVT tiles.
-- Endpoint scoped per-user/job (reuse `<user_id>/<upload_id>/` isolation).
+Out of Scope
+- Layer toggles / basemap switcher / opacity (delivered as FE19/FE20)
 
-**Scope — Frontend**
-- Add a **MapLibre** map to the results view (new panel or tab).
-- Overlay the contingency raster with a **class color ramp** (TP/FP/FN/TN) +
-  **legend**; basemap options (street/satellite, like the catalog map);
-  zoom-to-extent.
-- Toggle layers (contingency / clipped benchmark / clipped candidate).
-
-**Acceptance criteria**
-- Results shows an interactive, pan/zoom map of the contingency raster with a class
-  legend.
-- Colors correctly distinguish TP/FP/FN/TN; layer toggles work; map fits the data
-  extent.
-- Works for every method that emits a contingency raster; degrades gracefully if one
-  isn't present.
-
-**Notes:** biggest single GUI item; the tiling/COG backend is the main risk. Pairs
-with FE16 (static plot previews) as the two "visual results" tickets.
-
----
+Notes: Shipped (PR #8). MVP; scope B/C became FE19/FE20.
 
 ### FIMEVAL-FE16 — Inline plot / PNG previews in results
 
-**Type:** Feature *(FE + BE)* · **Priority:** Medium · **Est:** ~1.5–2 d
+Description: Results show metric cards, a table, client-rendered box-plots, and download
+links — but no fimeval-generated plots, because the worker runs `EvaluateFIM` with
+`plot_metrics=False`. Enable plot generation and preview PNGs inline.
 
-**Context**
-Results currently show metric cards, a table, client-rendered bootstrap box plots,
-and download links — but **no fimeval-generated plots**, because the worker runs
-`EvaluateFIM` with `plot_metrics=False` and doesn't call `PrintContingencyMap` /
-`PlotEvaluationMetrics`, so **no PNGs are produced**.
+[  ]  Worker enables plot generation (`plot_metrics` / `PrintContingencyMap`) and uploads the PNGs
+[  ]  Results render image outputs inline as thumbnails with a lightbox/zoom
+[  ]  Non-image outputs still appear as downloads; runs with no plots render cleanly
 
-**Scope — Backend**
-- Enable plot generation in the worker (`plot_metrics=True` and/or
-  `PrintContingencyMap` / `PlotEvaluationMetrics`), upload resulting PNGs to the
-  job's outputs.
+Out of Scope
+- Plot styling/theming beyond fimeval defaults
 
-**Scope — Frontend**
-- In `ResultsStep`, render image outputs (PNG) **inline** as thumbnails with a
-  lightbox/zoom, instead of download-only; keep non-image outputs as download links.
-
-**Acceptance criteria**
-- Successful runs show inline plot previews (contingency map + metric plots); click
-  enlarges.
-- Non-image outputs still appear as downloads; results with no plots render cleanly.
-
-**Notes:** plotting adds compute/memory to each run — validate against the worker
-memory budget (ties into the perf/OOM findings) before enabling by default;
-consider gating behind a parameter (see FE18).
-
----
+Notes: Drafted; NOT started. Plotting adds compute/memory — validate against the worker budget before enabling by default (gate behind FE18).
 
 ### FIMEVAL-FE17 — Job history list
 
-**Type:** Feature *(FE + BE)* · **Priority:** Medium · **Est:** ~3 d
+Description: Each run opened in its own pop-up; closing it lost the run from the UI. Jobs are
+persisted server-side (Tethys `DaskJob`), so a history view is a read over existing data.
 
-**Context**
-Each run opens in its own pop-up; when it's closed the run vanishes from the UI.
-Jobs *are* persisted server-side (Tethys `DaskJob` records with
-`extended_properties`), so a history view is a read over existing data.
+[  ]  Backend "list my jobs" endpoint returns the caller's jobs (id, method, status, created, upload_id), per-user-isolated
+[  ]  A history list in the main window: past runs with status, method, timestamp, link to results
+[  ]  In-progress rows live-refresh; a user only sees their own jobs
 
-**Scope — Backend**
-- Add a **"list my jobs"** endpoint returning the requesting user's jobs: id,
-  method, status, created timestamp, upload_id (filtered by `request.user`,
-  respecting per-user isolation).
+Out of Scope
+- Retention/cleanup (BE26)
 
-**Scope — Frontend**
-- A history list/view in the main window (or a route): past runs with **status
-  indicators** (queued / running / complete / error), method, timestamp, and a link
-  to open that run's results; live-refresh in-progress rows.
-
-**Acceptance criteria**
-- Main window lists the user's past runs with correct status and method/timestamp.
-- Clicking a completed run opens its results; a user only sees their own jobs.
-- In-progress jobs update status without a manual refresh.
-
-**Notes:** benefits directly from BE27/BE29 (failed/OOM jobs show a real terminal
-status here rather than a stale "running").
-
----
+Notes: **Largely superseded by the Workspace UI overhaul** (the pinned Runs list + `GET api/jobs` = BE34 deliver this). Keep as the tracking ticket or fold into the overhaul.
 
 ### FIMEVAL-FE18 — Evaluation parameters panel
 
-**Type:** Feature *(FE + BE)* · **Priority:** Medium · **Est:** ~2–3 d
+Description: The submit UI only picks a method. Framework knobs the library supports are
+hardcoded in the worker (bootstrap `sub_method`/`n_iterations`/`n_points`, `target_resolution`).
+Expose them as optional advanced parameters.
 
-**Context**
-The submit UI only picks a method. Framework knobs the library already supports are
-**hardcoded** in the worker (`evaluate_fim.py`): bootstrap `sub_method='random'`,
-`n_iterations=100`, `n_points=500`, and `target_crs`/`target_resolution`. The vision
-includes "configure evaluation parameters."
+[  ]  Advanced/optional params section in the submit flow (collapsed by default): bootstrap `sub_method` / `n_iterations` / `n_points`; optional `target_resolution` for all methods
+[  ]  Submit endpoint validates and threads them through `build_delayed` → `EvaluateFIM`
+[  ]  Defaults preserved when untouched; invalid values rejected with a clear message
+[  ]  Params surface in the run's Input details (ties into FE26)
 
-**Scope — Frontend**
-- Add an **advanced/optional parameters** section in `UploadStep` (collapsed by
-  default): for bootstrap → `sub_method` (random / systematic / stratified),
-  `n_iterations`, `n_points`; optionally `target_resolution` for all methods.
-  Sensible defaults, range validation.
+Out of Scope
+- Auto-tuning parameters
 
-**Scope — Backend**
-- Accept these params in the submit endpoint, validate, and thread them through
-  `build_delayed` → `EvaluateFIM` (they're already function args).
+Notes: Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33).
 
-**Acceptance criteria**
-- Bootstrap submit exposes `sub_method` / `n_iterations` / `n_points`; values reach
-  the worker and change the run.
-- Defaults preserved when the panel is untouched; invalid values rejected with a
-  clear message.
-- Params surface in the run window's Input details (ties into FE14) so a run is
-  self-describing.
+### FIMEVAL-FE19 — Configurable, switchable basemaps
 
-**Notes:** keep advanced params collapsed to avoid cluttering the simple flow; a
-`target_resolution` control also gives users a manual lever against the FE15/BE29
-high-resolution OOM case.
+Description: The contingency map had a single hardcoded satellite basemap. Add a configurable
+set of basemaps and a switcher, keeping Satellite as the default.
+
+[  ]  New `basemap_layers` custom setting (comma-separated preset keys: satellite/street/topographic; blank = all)
+[  ]  `GET api/basemaps` resolves the setting into the layer list + default
+[  ]  Frontend switcher swaps the basemap (Satellite default); built-in fallback if the endpoint is unreachable
+
+Out of Scope
+- Arbitrary user-supplied tile URLs (preset keys only)
+
+Notes: Shipped — `b9747f0` / `116b30c`.
+
+### FIMEVAL-FE20 — Contingency overlay visibility + opacity
+
+Description: The TP/FP/FN/TN overlay was always fully opaque with no way to see the imagery
+underneath. Add a visibility toggle and an opacity slider.
+
+[  ]  "Show overlay" toggle drives the overlay layer's visibility (basemap untouched)
+[  ]  Opacity slider (0–100%) drives `raster-opacity`; disabled while the overlay is hidden
+
+Out of Scope
+- Per-class visibility toggles
+
+Notes: Shipped — `b41b239`.
+
+### FIMEVAL-FE21 — Contingency map first in results
+
+Description: The results view led with metric cards, the table, and box-plots, with the map
+near the bottom. Reorder so the map is the first output.
+
+[  ]  Contingency map renders first in the results view
+[  ]  Box-plots (bootstrap) / metrics table (other methods) render second
+[  ]  Map self-hides when a run has no contingency COG (no empty gap)
+
+Out of Scope
+- Changes to the result components themselves
+
+Notes: Shipped — `8c70f5f`.
+
+### FIMEVAL-FE22 — Input Files disclosure in the results view
+
+Description: The "Input Files" disclosure (FE26) existed only in the running pop-up. Show it
+in the results view too, via a shared component.
+
+[  ]  "Input Files ▶" appears in the results view (benchmark / candidate(s) / boundary; name · resolution · CRS)
+[  ]  Rendered from a single shared component reused by both views (DRY)
+[  ]  Best-effort — hidden if absent; no change to the running view
+
+Out of Scope
+- New metadata fields (uses BE30's `inputs`)
+
+Notes: Shipped — `5853326`. Depends on FE26 + BE30.
+
+### FIMEVAL-FE23 — Fix maplibre-gl-worker.mjs 404 in production
+
+Description: The MapLibre worker 404'd only in the Tethys-served production build (dev works,
+Vite serves `node_modules` directly). maplibre's minified `new URL('./maplibre-gl-worker.mjs',
+<bundle>)` is invisible to Vite's static analysis, so the worker file was never emitted.
+
+[  ]  Worker imported via Vite's `?worker&url` (bundled into a self-contained asset)
+[  ]  `maplibregl.setWorkerUrl()` registers the emitted base-prefixed URL
+[  ]  Production build emits `assets/maplibre-gl-worker-*.js`; no 404 at `:8000`; tiles render
+
+Out of Scope
+- (none)
+
+Notes: Shipped — `6729ee1`.
+
+### FIMEVAL-FE24 — Accept/Reject "coarser resolution" modal
+
+Description: When BE33's guard rejects a job as too large, offer to run it at a coarser
+resolution instead of a dead-end error.
+
+[  ]  A `too_large` submit response shows a modal (not a generic error)
+[  ]  "Run at a coarser resolution" resubmits the same upload with `downsample: true` (no re-upload; pop-up opens from the click)
+[  ]  "Cancel" dismisses and keeps the selected inputs
+
+Out of Scope
+- A manual resolution slider (FE18)
+
+Notes: Shipped — `60f41e3`. Depends on BE33.
+
+### FIMEVAL-FE25 — Label benchmark vs candidate in the UI
+
+Description: Boss feedback: stop renaming uploads to `benchmark.tif` / `candidate_N.tif` in
+storage. Store inputs under `Benchmark/` and `Candidate/` folders keeping original filenames
+(backend half), and make the UI clearly label which raster is the Benchmark and which is the
+Candidate.
+
+[  ]  UI labels each input as Benchmark vs Candidate consistently (upload, running, results)
+[  ]  Original filenames shown everywhere (no `candidate_0.tif`-style placeholders)
+[  ]  Works against the `Benchmark/` + `Candidate/` folder storage layout
+
+Out of Scope
+- The backend storage-layout change itself (its own BE ticket — renumber; was loosely earmarked BE34)
+
+Notes: NOT started. Largest blast radius of the map-UX batch (touches the earliest merged branch).
+
+### FIMEVAL-FE26 — "Input Files" disclosure
+
+Description: While a job is queued/running, users can't see which files the run is
+evaluating. Add a collapsible "Input Files" disclosure driven by BE30's `inputs`.
+
+[  ]  "Input Files ▶" below the status line; `▶`/`▼` toggle, collapsed by default, keyboard-accessible
+[  ]  Each raster shows name · resolution · CRS; AOI runs also show the boundary shapefile name + CRS
+[  ]  Works before completion (Queued/Running); non-AOI shows no empty boundary section
+
+Out of Scope
+- Showing it in the results view (that's FE22)
+
+Notes: Shipped — but built under the wrong number: commit `597476f` reads `FIMEVAL-FE14`.
+**Reassigned to FE26 on 2026-08-06** (FE14 = the tracker's validation ticket). Depends on BE30.
