@@ -1,0 +1,155 @@
+/* reactapp/src/AppShell.css — workspace shell + FIM-family chrome */
+
+.wk-app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+/* ── Header ── */
+.wk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1.25rem;
+  /* FIM banner over a navy-gradient fallback (image 404s harmlessly in dev). */
+  background:
+    url('/static/fimeval_gui/images/Header-HQ.png') center / cover no-repeat,
+    linear-gradient(110deg, var(--chrome-1), var(--chrome-2));
+  color: var(--chrome-text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.wk-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: inherit;
+}
+.wk-brand-logo { height: 2.5rem; width: auto; object-fit: contain; display: block; flex: 0 0 auto; }
+/* Dark ink title + dark-green tagline, matching FIMbench (readable on the banner). */
+.wk-title { margin: 0; font-size: 1.375rem; font-weight: 700; letter-spacing: 0.3px; color: var(--color-text); }
+.wk-tagline { margin: 1px 0 0; font-size: 0.8125rem; color: #1b4332; }
+.wk-header-actions { display: flex; align-items: center; gap: 0.6rem; }
+/* Documentation button — FIMbench scheme: filled cyan + ink text; darker cyan on
+   hover, when pressed, and when live (on the docs page). */
+.wk-doc-pill {
+  display: inline-block;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  border: 2px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.wk-doc-pill:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.wk-doc-pill:active { background: var(--color-primary-active); border-color: var(--color-primary-active); }
+.wk-doc-pill.is-active { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+
+/* ── Body: nav | runs | detail ── */
+.wk-body { display: flex; min-height: 0; }
+
+.wk-nav {
+  flex: 0 0 190px;
+  /* FIM sidebar banner (blue) over a navy fallback; light text on top. */
+  background:
+    url('/static/fimeval_gui/images/FilterSidebar.png') center / cover no-repeat,
+    var(--chrome-1);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.wk-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 9px;
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  box-shadow: 0 2px 8px rgba(10, 27, 52, 0.35);
+}
+.wk-new-btn:hover { background: var(--color-primary-hover); }
+.wk-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 9px;
+  color: var(--chrome-text);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+.wk-nav-item:hover { background: rgba(255, 255, 255, 0.12); }
+.wk-nav-item.is-active { background: rgba(255, 255, 255, 0.18); color: #fff; font-weight: 600; }
+/* Sits at the sidebar's bottom, over the FilterSidebar white swoosh → dark text. */
+.wk-nav-foot { margin-top: auto; font-size: 0.72rem; color: var(--color-text); font-weight: 600; padding: 0.5rem; }
+
+.wk-runlist-col {
+  flex: 0 0 300px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wk-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1.5rem clamp(1rem, 2.5vw, 2rem);
+}
+
+/* ── Footer ── */
+.wk-footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1.5rem;
+  /* FIM banner (blue at the bottom edge) over a navy fallback; light text. */
+  background:
+    url('/static/fimeval_gui/images/Footer-HQ.png') center / cover no-repeat,
+    linear-gradient(110deg, var(--chrome-1), var(--chrome-2));
+  color: #ffffff;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.72rem;
+  text-shadow: 0 1px 2px rgba(10, 27, 52, 0.4);
+}
+.wk-footer a { color: #ffffff; }
+.wk-footer-attr { flex: 1; margin: 0; }
+.wk-footer-logos {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.wk-footer-logos img {
+  height: 1.6rem;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+.wk-footer-copy { flex: 1; text-align: right; margin: 0; }
+
+@media (max-width: 900px) {
+  .wk-footer { flex-direction: column; gap: 0.4rem; text-align: center; }
+  .wk-footer-attr, .wk-footer-copy { text-align: center; }
+  .wk-runlist-col { flex-basis: 240px; }
+  .wk-nav { flex-basis: 150px; }
+}
