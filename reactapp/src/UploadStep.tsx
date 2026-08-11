@@ -1,7 +1,7 @@
 // reactapp/src/UploadStep.tsx
 import { useState } from 'react';
 import Dropzone from './Dropzone';
-import { presignUpload, putFile, submitJob } from './api';
+import { presignUpload, putFile, submitJob, SubmitTooLargeError, type TooLargeInfo } from './api';
 import './UploadStep.css';
 
 // Per-file upload progress shown while files stream directly to MinIO.
@@ -34,6 +34,11 @@ function UploadStep() {
   const [lastRun, setLastRun] = useState<
     { jobId: number; url: string; blocked: boolean } | null
   >(null);
+  // Set when the backend reports the job is too large to run at full resolution;
+  // drives the Accept (downsample) / Reject modal.
+  const [tooLarge, setTooLarge] = useState<
+    { info: TooLargeInfo; uploadId: string; method: Method } | null
+  >(null);
 
   const addCandidates = (files: File[]) => setCandidates((prev) => mergeUnique(prev, files));
   const removeCandidate = (index: number) =>
@@ -63,7 +68,9 @@ function UploadStep() {
     if (!benchmark) return;
     setError(null);
     setLastRun(null);
+    setTooLarge(null);
     setSubmitting(true);
+    let uploadId: string | null = null;
 
     // Open the results pop-up synchronously, on the click, so the browser
     // doesn't block it — a pop-up opened after the upload's await would be.
@@ -80,6 +87,7 @@ function UploadStep() {
       const { upload_id, targets } = await presignUpload(
         benchmark, candidates, isAOI ? boundary : [],
       );
+      uploadId = upload_id;
 
       // Pair each presigned target with its File (match by field + filename).
       const pool: { field: string; file: File }[] = [
@@ -125,7 +133,41 @@ function UploadStep() {
       resetForm();
     } catch (e) {
       if (popup && !popup.closed) popup.close();
-      setError(e instanceof Error ? e.message : 'Upload failed. Please try again.');
+      if (e instanceof SubmitTooLargeError && uploadId) {
+        // Files already uploaded — offer to run at a coarser resolution instead
+        // of re-uploading. Resubmit happens from the modal's Accept button.
+        setTooLarge({ info: e.info, uploadId, method });
+      } else {
+        setError(e instanceof Error ? e.message : 'Upload failed. Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // User accepted the coarser-resolution run: resubmit the SAME upload with the
+  // downsample flag (no re-upload). Opening the pop-up here is allowed because
+  // this runs from the Accept click.
+  const acceptDownsample = async () => {
+    if (!tooLarge) return;
+    const { uploadId, method } = tooLarge;
+    setTooLarge(null);
+    setError(null);
+    setSubmitting(true);
+    const popup = window.open('', '_blank', 'width=950,height=850');
+    try {
+      const { job_id } = await submitJob(uploadId, method, true);
+      const url = jobViewUrl(job_id);
+      if (popup && !popup.closed) {
+        popup.location.href = url;
+        setLastRun({ jobId: job_id, url, blocked: false });
+      } else {
+        setLastRun({ jobId: job_id, url, blocked: true });
+      }
+      resetForm();
+    } catch (e) {
+      if (popup && !popup.closed) popup.close();
+      setError(e instanceof Error ? e.message : 'Submission failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -294,6 +336,33 @@ function UploadStep() {
               if you closed it.
             </>
           )}
+        </div>
+      )}
+
+      {tooLarge && (
+        <div className="upload-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="upload-modal">
+            <h3 className="upload-modal-title">This evaluation is large</h3>
+            <p className="upload-modal-body">{tooLarge.info.error}</p>
+            <div className="upload-modal-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setTooLarge(null)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={acceptDownsample}
+                disabled={submitting}
+              >
+                Run at a coarser resolution
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -290,15 +290,35 @@ class TestSubmitEndpoint(TethysTestCase):
             Bucket=BUCKET, Key=f'uploads/{user_id}/{upload_id}/candidate_{index}.tif', Body=body,
         )
 
+    def _put_geotiff(self, key, width, height, west, north, res, crs='EPSG:5070'):
+        """Upload a real (tiny) GeoTIFF with known resolution/extent to the mock
+        bucket, so the working-set estimate can read its header."""
+        import numpy as np
+        import rasterio
+        from rasterio.io import MemoryFile
+        from rasterio.transform import from_origin
+        with MemoryFile() as mem:
+            with mem.open(
+                driver='GTiff', height=height, width=width, count=1, dtype='uint8',
+                crs=crs, transform=from_origin(west, north, res, res),
+            ) as ds:
+                ds.write(np.ones((height, width), dtype='uint8'), 1)
+            boto3.client('s3', region_name='us-east-1').put_object(
+                Bucket=BUCKET, Key=key, Body=mem.read(),
+            )
+
     def _put_upload(self, upload_id):
         """Stage a complete upload: a non-empty benchmark and one candidate."""
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
-    def _submit(self, upload_id, method='smallest_extent'):
+    def _submit(self, upload_id, method='smallest_extent', downsample=False):
+        payload = {'upload_id': upload_id, 'method': method}
+        if downsample:
+            payload['downsample'] = True
         return self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': upload_id, 'method': method}),
+            data=json.dumps(payload),
             content_type='application/json',
         )
 
@@ -319,6 +339,60 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_benchmark('u_ec')
         self._put_candidate('u_ec', body=b'')
         self.assertEqual(self._submit('u_ec').status_code, 400)
+
+    def test_estimate_uses_coarsest_resolution_not_raw_benchmark(self):
+        # The Tier_1 bug: a fine-res benchmark (90k raw px) paired with a coarser
+        # candidate. fimeval downsamples both to the coarsest (10 m) resolution
+        # before evaluating, so the real working set is ~overlap/coarsest^2 —
+        # here ~900 px, NOT the benchmark's 90k. The guard must estimate the
+        # former, or huge-but-coarsenable Tier_1 rasters get wrongly rejected.
+        from tethysapp.fimeval_gui import controllers
+        self._put_geotiff('uploads/%s/u_est/benchmark.tif' % self.user.id,
+                          300, 300, west=1_000_000, north=2_000_000, res=1)
+        self._put_geotiff('uploads/%s/u_est/candidate_0.tif' % self.user.id,
+                          30, 30, west=1_000_000, north=2_000_000, res=10)
+        est = controllers._estimate_working_pixels(
+            controllers._get_storage(), 'uploads/%s/u_est/' % self.user.id,
+            ['candidate_0.tif'],
+        )
+        self.assertIsNotNone(est)
+        self.assertLess(est['pixels'], 5_000)      # ~900, nowhere near 90k
+        self.assertGreater(est['pixels'], 100)
+
+    def test_submit_rejects_oversized_working_set_with_reworded_message(self):
+        self._put_upload('u_big')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 10_000_000_000, 'fit_resolution_m': 30.0},
+        ):
+            response = self._submit('u_big')
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertTrue(body['too_large'])
+        # Reworded (boss): never expose memory internals to the user.
+        self.assertNotIn('memory', body['error'].lower())
+        self.assertNotIn('fimeval_worker_memory', body['error'].lower())
+
+    def test_submit_allows_small_working_set(self):
+        self._put_upload('u_ok')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_ok')
+        self.assertEqual(response.status_code, 202)
+
+    def test_submit_downsample_bypasses_guard_and_threads_target_resolution(self):
+        self._put_upload('u_ds')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 10_000_000_000, 'fit_resolution_m': 30.0},
+        ):
+            response = self._submit('u_ds', downsample=True)
+        self.assertEqual(response.status_code, 202)
+        # The chosen fit resolution is threaded to the job so the worker actually
+        # coarsens (otherwise "Accept" would OOM again).
+        self.assertEqual(self.mock_job.extended_properties['target_resolution'], 30.0)
 
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')
@@ -547,7 +621,64 @@ class TestStatusEndpoint(TethysTestCase):
         body = json.loads(response.content)
         self.assertEqual(body['status'], 'error')
         self.assertIn('Too many points failed to transform', body.get('reason', ''))
-        mock_storage.get_object.assert_called_once_with('outputs/1/uid1/_FAILED')
+        mock_storage.get_object.assert_any_call('outputs/1/uid1/_FAILED')
+
+    def test_status_times_out_a_stuck_non_terminal_job(self):
+        # A worker OOM-killed mid-task never writes a terminal marker, so the job
+        # would otherwise poll as 'running' forever. Past the timeout the endpoint
+        # must report a terminal 'error' with a reason so the UI stops.
+        import datetime
+        from django.utils import timezone
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        job.creation_time = timezone.now() - datetime.timedelta(hours=2)
+        mock_future = MagicMock()
+        mock_future.status = 'pending'
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = ['outputs/1/uid1/_RUNNING']
+        empty = MagicMock()
+        empty.read.return_value = b''
+        mock_storage.get_object.return_value = {'Body': empty}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIsNotNone(body['reason'])
+        self.assertIn('did not complete', body['reason'].lower())
+
+    def test_status_returns_inputs_metadata(self):
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        mock_future = MagicMock()
+        mock_future.status = 'finished'  # complete
+        mock_storage = MagicMock()
+        body = MagicMock()
+        body.read.return_value = json.dumps({
+            'benchmark': {'name': 'PSS.tif', 'resolution': [10, 10], 'crs': 'EPSG:5070'},
+            'candidates': [
+                {'name': 'OWP.tif', 'resolution': [10, 10], 'crs': 'EPSG:5070'}
+            ],
+        }).encode()
+        mock_storage.get_object.return_value = {'Body': body}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        data = json.loads(response.content)
+        self.assertEqual(data['inputs']['benchmark']['name'], 'PSS.tif')
+        self.assertEqual(data['inputs']['candidates'][0]['crs'], 'EPSG:5070')
+        mock_storage.get_object.assert_called_with('outputs/1/uid1/inputs.json')
 
     def test_status_running_when_outputs_but_no_marker(self):
         # Outputs present but the terminal marker hasn't landed yet — must NOT
@@ -645,6 +776,7 @@ class TestOutputsEndpoint(TethysTestCase):
             'outputs/1/uid1/case_study/smallest_extent/EvaluationMetrics.csv',
             'outputs/1/uid1/_SUCCESS',
             'outputs/1/uid1/_RUNNING',
+            'outputs/1/uid1/inputs.json',
         ]
         with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
@@ -654,6 +786,7 @@ class TestOutputsEndpoint(TethysTestCase):
         self.assertIn('EvaluationMetrics.csv', names)
         self.assertNotIn('_SUCCESS', names)
         self.assertNotIn('_RUNNING', names)
+        self.assertNotIn('inputs.json', names)  # metadata, not a downloadable output
 
     def test_outputs_returns_files_even_if_status_not_com(self):
         # Dev job monitor doesn't tick (_status stays SUB/RUN); outputs presence
@@ -1243,13 +1376,32 @@ class TestPresignEndpoint(TethysTestCase):
             self.assertIsInstance(t['url'], str)
             self.assertIn(t['key'], t['url'])
 
-    def test_presign_stores_no_objects(self):
-        """Presigning must not put any bytes in storage — that is the whole point."""
+    def test_presign_stores_no_file_bytes(self):
+        """Presigning must not put any uploaded file bytes in storage — the
+        browser uploads directly. Only a small manifest.json (original filenames)
+        is written; never benchmark.tif / candidate_*.tif bytes."""
         self._post({'benchmark': 'b.tif', 'candidates': ['c0.tif']})
-        remaining = boto3.client('s3', region_name='us-east-1').list_objects_v2(
-            Bucket=BUCKET, Prefix='uploads/',
+        keys = [
+            o['Key']
+            for o in boto3.client('s3', region_name='us-east-1')
+            .list_objects_v2(Bucket=BUCKET, Prefix='uploads/')
+            .get('Contents', [])
+        ]
+        self.assertTrue(keys, 'expected the manifest to be written')
+        self.assertTrue(all(k.endswith('/manifest.json') for k in keys), keys)
+
+    def test_presign_writes_manifest_of_original_names(self):
+        response = self._post(
+            {'benchmark': 'PSS_bench.tif', 'candidates': ['OWP.tif']}
         )
-        self.assertEqual(remaining.get('KeyCount', 0), 0)
+        upload_id = json.loads(response.content)['upload_id']
+        key = f'uploads/{self.user.id}/{upload_id}/manifest.json'
+        obj = boto3.client('s3', region_name='us-east-1').get_object(
+            Bucket=BUCKET, Key=key
+        )
+        names = json.loads(obj['Body'].read())['names']
+        self.assertEqual(names['benchmark.tif'], 'PSS_bench.tif')
+        self.assertEqual(names['candidate_0.tif'], 'OWP.tif')
 
     def test_boundary_targets_included(self):
         response = self._post({

@@ -115,7 +115,7 @@ This application runs on:
   [`fimeval`](https://pypi.org/project/fimeval/) ≥ 0.1.64 installed):
 
   ```bash
-  dask scheduler --port 8786
+  ./tethysapp/fimeval_gui/scripts/start_scheduler.sh   # scheduler + bounded worker-death retries
   # Env-configurable; the defaults reproduce the 2-worker / 6 GB pool.
   # Size it to your host with docs/specs/worker-sizing-guide.md.
   ./tethysapp/fimeval_gui/scripts/start_worker.sh
@@ -132,7 +132,10 @@ This application runs on:
   `PROJ_NETWORK=OFF` (reprojections need no downloadable PROJ grids, so they
   shouldn't depend on a CDN that can fail transiently under load) and
   `PYTHONUNBUFFERED=1` (streams fimeval's progress/error output live instead of
-  buffering it until the worker exits).
+  buffering it until the worker exits). `start_scheduler.sh` sets
+  `distributed.scheduler.allowed-failures=1` (env `FIMEVAL_ALLOWED_FAILURES`) so a
+  task that OOM-kills a worker is retried once, then failed fast — instead of the
+  default 3 retries that thrash the pool before the job errors.
 
   > Sizing the pool for your host (RAM → worker count / memory), including the
   > dev-vs-separate-host topology: see
