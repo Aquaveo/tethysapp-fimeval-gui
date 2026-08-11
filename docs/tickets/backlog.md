@@ -12,6 +12,47 @@ collisions resolved 2026-08-06: **FE14** = the tracker's "Run Intersected Extent
 
 ---
 
+## Worst-case estimates (dev-days, single dev)
+
+Conservative upper bounds incl. tests + review. Done tickets show the effort they
+warranted (historical); the numbers to plan around are the not-started ones.
+
+| Ticket | Status | Est |
+|--------|--------|----:|
+| BE26 | not started | ~2 d |
+| BE27 | done | ~1.5 d |
+| BE28 | done | ~0.5 d |
+| BE29 | done | ~4 d |
+| BE30 | done | ~2 d |
+| BE31 | done | ~2 d |
+| BE32 | done | ~3 d |
+| BE33 | done | ~2.5 d |
+| BE34 | done | ~1 d |
+| FE15 | done | ~5–6 d |
+| FE16 | drafted | ~1.5–2 d |
+| FE17 | superseded by overhaul | ~3 d |
+| FE18 | drafted | ~2–3 d |
+| FE19 | done | ~1.5 d |
+| FE20 | done | ~0.5 d |
+| FE21 | done | ~0.5 d |
+| FE22 | done | ~0.5 d |
+| FE23 | done | ~1.5 d |
+| FE24 | done | ~1 d |
+| FE25 | not started | ~1 d (UI only; + ~2–3 d backend storage-layout) |
+| FE26 | done | ~1 d |
+| FE27 | not started | ~3 d |
+| FE28 | not started | ~2 d |
+| FE29 | not started | ~3 d |
+| FE30 | not started | ~2 d |
+| FE31 | not started | ~2 d |
+| FE32 | not started | ~1.5 d |
+
+**Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
+BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
+is the FE27 router migration and FE31's ECharts→PNG export.
+
+---
+
 ## Reliability & Backend
 
 ### FIMEVAL-BE26 — Output retention & cleanup policy
