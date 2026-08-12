@@ -147,9 +147,19 @@
 }
 .wk-footer-copy { flex: 1; text-align: right; margin: 0; }
 
+/* Columns shrink before the detail pane gets cramped; the pane has min-width:0
+   and its own scroll, so the page body never scrolls sideways. */
+@media (max-width: 1024px) { .wk-runlist-col { flex-basis: 260px; } }
 @media (max-width: 900px) {
   .wk-footer { flex-direction: column; gap: 0.4rem; text-align: center; }
   .wk-footer-attr, .wk-footer-copy { text-align: center; }
-  .wk-runlist-col { flex-basis: 240px; }
+  .wk-runlist-col { flex-basis: 230px; }
   .wk-nav { flex-basis: 150px; }
+  .wk-header { padding: 0.5rem 0.9rem; }
+  .wk-tagline { display: none; }
+}
+@media (max-width: 680px) {
+  .wk-runlist-col { flex-basis: 180px; }
+  .wk-nav { flex-basis: 128px; }
+  .wk-detail { padding: 1rem; }
 }
