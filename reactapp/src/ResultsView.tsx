@@ -1,4 +1,8 @@
-// reactapp/src/ResultsStep.tsx
+// reactapp/src/ResultsView.tsx
+// Renders a completed run's results in the detail pane: Input Files, the
+// contingency map (first, FE21), box plots (bootstrap) / metrics table, headline
+// cards, and per-file downloads. Self-loads outputs/metrics/bootstrap/inputs.
+// (Export + Re-run actions are added in FE31.)
 import { useEffect, useState } from 'react';
 import {
   getJobOutputs,
@@ -15,11 +19,6 @@ import InputFiles from './InputFiles';
 import ErrorBoundary from './ErrorBoundary';
 import './ResultsStep.css';
 
-interface ResultsStepProps {
-  jobId: number;
-  onReset: () => void;
-}
-
 const HEADLINE_METRICS = ['CSI', 'POD', 'FAR'];
 
 function formatValue(v: number | null): string {
@@ -27,7 +26,7 @@ function formatValue(v: number | null): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(4);
 }
 
-function ResultsStep({ jobId, onReset }: ResultsStepProps) {
+export default function ResultsView({ jobId }: { jobId: number }) {
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [metrics, setMetrics] = useState<JobMetrics | null>(null);
@@ -51,15 +50,12 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
           if (!cancelled) setMetrics(null);
         }
         try {
-          // 404 for non-bootstrap jobs — treated as "no distribution to show".
           const b = await getBootstrapDistribution(jobId);
           if (!cancelled) setBootstrap(b);
         } catch {
           if (!cancelled) setBootstrap(null);
         }
         try {
-          // Input metadata (names · resolution · CRS) the worker published, so
-          // the results view can show what the run evaluated (FE22). Best-effort.
           const s = await getJobStatus(jobId);
           if (!cancelled) setInputs(s.inputs ?? null);
         } catch {
@@ -86,7 +82,7 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
 
   if (phase === 'loading') {
     return (
-      <div className="step-placeholder results-step">
+      <div className="results-step">
         <div className="results-spinner" aria-hidden="true" />
         <p className="results-loading">Loading results&hellip;</p>
       </div>
@@ -95,14 +91,8 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
 
   if (phase === 'error') {
     return (
-      <div className="step-placeholder results-step">
-        <h2>Results</h2>
+      <div className="results-step">
         <p className="results-error">Could not load the evaluation results.</p>
-        <div className="results-actions">
-          <button type="button" className="button-primary" onClick={onReset}>
-            Start Over
-          </button>
-        </div>
       </div>
     );
   }
@@ -117,28 +107,20 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
   const headline = HEADLINE_METRICS
     .map((name) => ({ name, value: metricValue(name) }))
     .filter((h) => h.value !== null);
+  // A convenience download for the contingency raster (also in the file list).
+  const contingency = outputs.find(
+    (f) => /contingenc/i.test(f.name) && /\.tiff?$/i.test(f.name),
+  );
 
   return (
-    <div className="step-placeholder results-step">
-      <header className="results-header">
-        <h2>Evaluation Results</h2>
-        <p className="results-subtitle">
-          Job #{jobId}
-          {candidates.length > 0 && ` · ${candidates.join(', ')}`}
-        </p>
-      </header>
-
-      {/* What the run evaluated — benchmark / candidate(s) / boundary (FE22). */}
+    <div className="results-step">
+      {/* What the run evaluated (FE22). */}
       {inputs && <InputFiles inputs={inputs} />}
 
-      {/* Contingency map is the first output shown (FE21): the visual result of
-          the evaluation, above the numbers. Renders nothing when the job has no
-          contingency COG (e.g. an older run), so non-map jobs see no gap. */}
+      {/* Contingency map first (FE21); renders nothing when there's no COG. */}
       <ContingencyMap jobId={jobId} />
 
-      {/* Second: the primary analytical output — box plots for a bootstrap run,
-          the metrics table for every other method. (A bootstrap run still shows
-          the metrics table below, as supplementary detail.) */}
+      {/* Second: box plots for bootstrap, else the metrics table. */}
       {bootstrap && bootstrap.candidates.length > 0 && (
         <ErrorBoundary
           fallback={
@@ -196,34 +178,29 @@ function ResultsStep({ jobId, onReset }: ResultsStepProps) {
             <div className="results-panel-title results-downloadall-title">Download results</div>
             <span className="results-downloadall-hint">All output files bundled into one ZIP.</span>
           </div>
-          <a className="button-primary results-download-all" href={downloadAllUrl(jobId)}>
-            Download Results (.zip)
-          </a>
+          <div className="results-download-buttons">
+            {contingency && (
+              <a className="button-secondary" href={downloadUrl(jobId, contingency.key)} download>
+                ⬇ Contingency map (GeoTIFF)
+              </a>
+            )}
+            <a className="button-primary results-download-all" href={downloadAllUrl(jobId)}>
+              Download Results (.zip)
+            </a>
+          </div>
         </div>
         <div className="results-panel-title">Individual files</div>
         <ul className="results-files">
           {outputs.map((f) => (
             <li className="results-file" key={f.key}>
               <span className="results-file-name">{f.name}</span>
-              <a
-                className="results-download-link"
-                href={downloadUrl(jobId, f.key)}
-                download
-              >
+              <a className="results-download-link" href={downloadUrl(jobId, f.key)} download>
                 Download
               </a>
             </li>
           ))}
         </ul>
       </div>
-
-      <div className="results-actions">
-        <button type="button" className="button-primary" onClick={onReset}>
-          Start New Evaluation
-        </button>
-      </div>
     </div>
   );
 }
-
-export default ResultsStep;

@@ -457,7 +457,11 @@ def api_jobs_submit(request):
     Validates the method and that the upload exists (and, for AOI, that a ``.shp``
     is present), then creates and executes a DaskJob. Returns ``{job_id, status}``
     (202). 400 on bad input, 404 unknown upload, 503 if storage/scheduler is down.
+
+    GET lists the requesting user's jobs (for the Runs list) — see ``_list_user_jobs``.
     """
+    if request.method == 'GET':
+        return _list_user_jobs(request)
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -602,12 +606,48 @@ _TETHYS_TO_STATUS = {
     'VAR': 'running',
 }
 
+
+def _list_user_jobs(request):
+    """GET ``api/jobs``: the requesting user's evaluations, newest first, for the
+    Runs list. A read over the persisted Tethys ``DaskJob`` records — filtered to
+    ``request.user`` (with a belt-and-suspenders ownership check so another user's
+    jobs can never leak)."""
+    try:
+        jobs = App.get_job_manager().list_jobs(user=request.user)
+    except TypeError:
+        # Older job-manager signature without a user filter — filter below.
+        jobs = App.get_job_manager().list_jobs()
+    except Exception as exc:
+        logger.error('list_jobs failed: %s', exc)
+        return JsonResponse({'error': 'could not list jobs'}, status=503)
+
+    out = []
+    for j in jobs:
+        if getattr(j, 'user', None) != request.user:
+            continue
+        props = j.extended_properties or {}
+        created = getattr(j, 'creation_time', None)
+        out.append({
+            'job_id': j.id,
+            'method': props.get('method'),
+            'status': _TETHYS_TO_STATUS.get(getattr(j, '_status', None), 'submitted'),
+            'created': created.isoformat() if created else None,
+            'upload_id': props.get('upload_id'),
+        })
+    out.sort(key=lambda r: r['job_id'], reverse=True)
+    return JsonResponse({'jobs': out})
+
 # A running job that never reaches a terminal state — e.g. a worker OOM-killed
 # mid-task that never wrote a _FAILED marker, or one stuck in a restart loop —
 # would otherwise poll as 'running' forever. Past this wall-clock age it is
 # reported as a terminal error so the UI stops polling. Overridable per
 # deployment (long-running pools may want a higher ceiling).
 _JOB_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_TIMEOUT_SECONDS', 30 * 60)
+
+# A much shorter ceiling for a job no worker ever picked up — still queued/submitted
+# with no _RUNNING marker (e.g. the Dask worker is down, or the pool is saturated).
+# Kept separate from the running timeout so a legitimate heavy run isn't cut off (BE35).
+_JOB_START_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_START_TIMEOUT_SECONDS', 120)
 
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
@@ -675,11 +715,19 @@ def api_job_status(request, job_id):
     # Wall-clock safety net: a running job that never reached a terminal state
     # is reported as a terminal error past the timeout so the UI stops polling.
     timed_out = False
+    never_started = False
     if status == 'running' and job.creation_time:
         age = (timezone.now() - job.creation_time).total_seconds()
         if age > _JOB_TIMEOUT_SECONDS:
             status = 'error'
             timed_out = True
+    # Never-started net (BE35): still queued/submitted with no _RUNNING marker means
+    # no worker took it — fail fast, long before the running timeout above.
+    elif status in ('queued', 'submitted') and job.creation_time:
+        age = (timezone.now() - job.creation_time).total_seconds()
+        if age > _JOB_START_TIMEOUT_SECONDS:
+            status = 'error'
+            never_started = True
 
     # On failure, surface the reason the worker wrote into the _FAILED marker
     # (fimeval's captured error) so the UI can show it instead of a generic
@@ -699,6 +747,11 @@ def api_job_status(request, job_id):
                 ) or None
             except (ClientError, BotoCoreError, KeyError) as exc:
                 logger.warning('Failed to read _FAILED reason for job %s: %s', job_id, exc)
+        if reason is None and never_started:
+            reason = (
+                'No worker picked this evaluation up in time — the Dask worker '
+                'may not be running. Start it and submit again.'
+            )
         if reason is None and timed_out:
             reason = (
                 'Evaluation did not complete in time — the worker may have run '

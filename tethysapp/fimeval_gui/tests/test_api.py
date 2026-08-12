@@ -485,7 +485,8 @@ class TestSubmitEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_submit_wrong_method_returns_405(self):
-        response = self.client.get('/apps/fimeval-gui/api/jobs/')
+        # GET now lists jobs (BE34); an unsupported verb still 405s.
+        response = self.client.put('/apps/fimeval-gui/api/jobs/')
         self.assertEqual(response.status_code, 405)
 
     def test_submit_requires_login(self):
@@ -652,6 +653,57 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertEqual(body['status'], 'error')
         self.assertIsNotNone(body['reason'])
         self.assertIn('did not complete', body['reason'].lower())
+
+    def _pending_no_marker_job(self, age):
+        import datetime
+        from django.utils import timezone
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        job.creation_time = timezone.now() - age
+        mock_future = MagicMock()
+        mock_future.status = 'pending'  # -> queued
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = []  # no worker markers = never started
+        empty = MagicMock()
+        empty.read.return_value = b''
+        mock_storage.get_object.return_value = {'Body': empty}
+        return job, mock_future, mock_storage
+
+    def test_status_times_out_a_never_started_job(self):
+        # No worker ever picked the job up (queued, no _RUNNING marker). Past the
+        # short "never-started" timeout (BE35) it must fail fast — long before the
+        # 30-min running timeout — with a worker-oriented reason.
+        import datetime
+        job, mock_future, mock_storage = self._pending_no_marker_job(
+            datetime.timedelta(minutes=5)
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('worker', (body['reason'] or '').lower())
+
+    def test_status_keeps_a_recently_queued_job(self):
+        # A job queued only a moment ago (worker may just be busy) must NOT be
+        # failed by the never-started timeout.
+        import datetime
+        job, mock_future, mock_storage = self._pending_no_marker_job(
+            datetime.timedelta(seconds=20)
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(json.loads(response.content)['status'], 'queued')
 
     def test_status_returns_inputs_metadata(self):
         job = self._make_job(
@@ -1645,4 +1697,66 @@ class TestBasemapsEndpoint(TethysTestCase):
     def test_post_not_allowed(self):
         self._set_setting(None)
         resp = self.client.post(self.URL)
+        self.assertEqual(resp.status_code, 405)
+
+
+class TestListJobsEndpoint(TethysTestCase):
+    URL = '/apps/fimeval-gui/api/jobs/'
+
+    def setUp(self):
+        super().setUp()
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.user = self.create_test_user(username='lister', password='pw', email='l@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        super().tearDown()
+
+    def _job(self, jid, method, status_code, user=None):
+        from tethys_sdk.jobs import DaskJob
+        from django.utils import timezone
+        j = MagicMock(spec=DaskJob)
+        j.id = jid
+        j.user = user if user is not None else self.user
+        j.extended_properties = {
+            'upload_id': f'u{jid}', 'user_id': str(j.user.id), 'method': method,
+        }
+        j.creation_time = timezone.now()
+        j._status = status_code
+        return j
+
+    def _set_jobs(self, jobs):
+        self.mock_app.get_job_manager.return_value.list_jobs.return_value = jobs
+
+    def test_get_jobs_lists_mine_newest_first(self):
+        self._set_jobs([self._job(51, 'bootstrap', 'COM'), self._job(52, 'AOI', 'RUN')])
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        jobs = json.loads(resp.content)['jobs']
+        self.assertEqual([j['job_id'] for j in jobs], [52, 51])   # newest first
+        self.assertEqual(jobs[1]['method'], 'bootstrap')
+        self.assertEqual(jobs[0]['status'], 'running')
+        self.assertEqual(jobs[0]['upload_id'], 'u52')
+
+    def test_get_jobs_excludes_other_users(self):
+        other = self.create_test_user(username='intruder', password='pw', email='i@b.com')
+        self._set_jobs([
+            self._job(60, 'bootstrap', 'COM'),
+            self._job(61, 'AOI', 'COM', user=other),
+        ])
+        resp = self.client.get(self.URL)
+        ids = [j['job_id'] for j in json.loads(resp.content)['jobs']]
+        self.assertEqual(ids, [60])
+
+    def test_get_jobs_empty(self):
+        self._set_jobs([])
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)['jobs'], [])
+
+    def test_put_not_allowed(self):
+        resp = self.client.put(self.URL)
         self.assertEqual(resp.status_code, 405)
