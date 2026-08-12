@@ -28,6 +28,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | BE32 | done | ~3 d |
 | BE33 | done | ~2.5 d |
 | BE34 | done | ~1 d |
+| BE35 | not started | ~1 d |
 | FE15 | done | ~5–6 d |
 | FE16 | drafted | ~1.5–2 d |
 | FE17 | superseded by overhaul | ~3 d |
@@ -209,6 +210,27 @@ Out of Scope
 
 Notes: New (Workspace UI overhaul). Delivers the backend half of FE17. Provisional number —
 BE34 was loosely earmarked for the folder-rename backend (FE25); confirm on the board.
+
+### FIMEVAL-BE35 — Fail fast when no worker picks a job up (short "never-started" timeout)
+
+Description: The wall-clock safety net (BE29) only flips a job to terminal `error` when it's
+stuck **`running`** (`if status == 'running' and age > FIMEVAL_JOB_TIMEOUT_SECONDS`, default
+30 min). A job that never *starts* — scheduler/worker down, or the pool saturated so it sits
+`queued`/`submitted` — isn't covered, so the UI polls "in progress" indefinitely. A no-worker
+job should fail in a couple of minutes; but a genuinely-running heavy job must NOT be cut off
+early, so this needs a *separate, shorter* threshold than the running timeout.
+
+[  ]  Add a short "never-started" timeout (env `FIMEVAL_JOB_START_TIMEOUT_SECONDS`, default ~120s) applied to `queued`/`submitted` jobs by `creation_time` age → terminal `error` with a clear reason ("no worker picked this up — is the Dask worker running?")
+[  ]  Keep the existing running timeout (`FIMEVAL_JOB_TIMEOUT_SECONDS`, 30 min) for jobs actually executing, so a legitimate heavy run isn't killed mid-flight
+[  ]  Once a worker writes `_RUNNING` (job is executing), the never-started timeout no longer applies — only the running timeout does
+[  ]  Both thresholds env-configurable; documented in HARDENING.md
+
+Out of Scope
+- Cancelling / removing the stuck Tethys job record (separate cleanup)
+- Fixing submit when the scheduler is unreachable (that already errors)
+
+Notes: Found 2026-08-12 while testing the workspace overhaul with Dask stopped. Provisional
+number BE35 — confirm on the board. Complements BE29. Est: ~1 d.
 
 ---
 
