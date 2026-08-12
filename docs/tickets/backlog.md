@@ -541,6 +541,8 @@ hardcode light colours). **Design sign-off on a dark mock-up required before bui
 
 [  ]  Dark token set (dark surfaces/borders/text, brighter cyan accent) via `prefers-color-scheme` + optional in-app toggle
 [  ]  All content components theme correctly in dark: runlist cards, results panels/tables/cards, ECharts box-plots, contingency map legend + controls, wizard, modals
+[  ]  **All text stays light/readable on dark surfaces** — incl. the run **method name** in the Runs cards (user flagged it as unreadable in the dark preview)
+[  ]  **Dark banner assets:** swap Header-HQ / Footer-HQ / FilterSidebar to dark-recoloured variants (e.g. `*-dark.png`, user is preparing them) under `prefers-color-scheme: dark` / the toggle
 [  ]  Chrome banners + partner logos stay legible on dark; contrast meets WCAG AA in both themes
 [  ]  No light-mode regressions
 
