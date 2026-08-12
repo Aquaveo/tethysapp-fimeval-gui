@@ -46,7 +46,9 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE29 | not started | ~3 d |
 | FE30 | not started | ~2 d |
 | FE31 | not started | ~2 d |
-| FE32 | not started | ~1.5 d |
+| FE32 | done | ~1.5 d |
+| FE33 | not started | ~1.5 d |
+| FE34 | not started | ~2–3 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -511,3 +513,39 @@ Out of Scope
 - Effort 3 (retention/cleanup — BE26)
 
 Notes: New. Plan Task 9.
+
+### FIMEVAL-FE33 — Mobile: restack the workspace on small screens
+
+Description: The workspace's three columns (nav · Runs list · detail) only *shrink* on
+narrow screens (FE32), so they get cramped on a phone. Make it genuinely responsive:
+below a breakpoint the columns **restack** into a mobile layout — nav as a top bar /
+menu, the Runs list collapsible or full-width, and the detail full-width.
+
+[  ]  Below ~640px the columns restack rather than shrink (nav → top bar/menu; Runs list → collapsible drawer or full-width list; detail full-width)
+[  ]  No horizontal body scroll at any width; wide content (map, tables) scrolls within its own container
+[  ]  Touch-sized targets; the Runs list stays reachable (toggle/drawer) without losing the detail
+[  ]  Usable down to ~360px
+
+Out of Scope
+- Native app / offline
+
+Notes: New. Follow-up to FE32 (which shrinks but doesn't restack). User request 2026-08-12. Est: ~1.5 d.
+
+### FIMEVAL-FE34 — Dark mode
+
+Description: Add a dark theme to the workspace. The FIM chrome (blue banner header/footer)
+stays; the content area — Runs list, detail pane, cards, tables, contingency map panel,
+box-plots — flips to dark surfaces with light text, following the viewer's OS preference
+and/or an in-app toggle. Requires theming every component through tokens (some currently
+hardcode light colours). **Design sign-off on a dark mock-up required before build.**
+
+[  ]  Dark token set (dark surfaces/borders/text, brighter cyan accent) via `prefers-color-scheme` + optional in-app toggle
+[  ]  All content components theme correctly in dark: runlist cards, results panels/tables/cards, ECharts box-plots, contingency map legend + controls, wizard, modals
+[  ]  Chrome banners + partner logos stay legible on dark; contrast meets WCAG AA in both themes
+[  ]  No light-mode regressions
+
+Out of Scope
+- Per-user *persisted* theme preference (default to OS is fine for v1)
+
+Notes: New. User wants a mock-up to sign off before build. Follow-up to the overhaul.
+User request 2026-08-12. Est: ~2–3 d.
