@@ -30,9 +30,9 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | BE34 | done | ~1 d |
 | BE35 | not started | ~1 d |
 | FE15 | done | ~5–6 d |
-| FE16 | drafted | ~1.5–2 d |
-| FE17 | superseded by overhaul | ~3 d |
-| FE18 | drafted | ~2–3 d |
+| FE17 | ✅ done (via BE34 + FE28) | ~3 d |
+| ~~FE16~~ → FE35 | renumbered (FE16 is the tracker's) | — |
+| ~~FE18~~ → FE36 | renumbered (FE18 = tracker's "Pre-staged Benchmark Upload UI") | — |
 | FE19 | done | ~1.5 d |
 | FE20 | done | ~0.5 d |
 | FE21 | done | ~0.5 d |
@@ -49,6 +49,8 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE32 | done | ~1.5 d |
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
+| FE35 | not started (was FE16) | ~1.5–2 d |
+| FE36 | not started (was FE18) | ~2–3 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -254,7 +256,12 @@ Out of Scope
 
 Notes: Shipped (PR #8). MVP; scope B/C became FE19/FE20.
 
-### FIMEVAL-FE16 — Inline plot / PNG previews in results
+> **⚠ FE16 / FE17 / FE18 were early *invented* draft numbers — they belong to the tracker,
+> not us (confirmed 2026-08-12: FE18 = "Pre-staged Benchmark Upload UI"). FE17's content
+> (job history) already shipped via **BE34 + FE28**. The two still-unbuilt features below are
+> renumbered *up* from FE34 → FE35 / FE36. Don't reuse FE16/17/18 for our work.**
+
+### FIMEVAL-FE35 — Inline plot / PNG previews in results
 
 Description: Results show metric cards, a table, client-rendered box-plots, and download
 links — but no fimeval-generated plots, because the worker runs `EvaluateFIM` with
@@ -267,37 +274,23 @@ links — but no fimeval-generated plots, because the worker runs `EvaluateFIM` 
 Out of Scope
 - Plot styling/theming beyond fimeval defaults
 
-Notes: Drafted; NOT started. Plotting adds compute/memory — validate against the worker budget before enabling by default (gate behind FE18).
+Notes: Was mislabeled FE16. Drafted; NOT started. Plotting adds compute/memory — validate against the worker budget before enabling by default (gate behind FE36). Est: ~1.5–2 d.
 
-### FIMEVAL-FE17 — Job history list
-
-Description: Each run opened in its own pop-up; closing it lost the run from the UI. Jobs are
-persisted server-side (Tethys `DaskJob`), so a history view is a read over existing data.
-
-[  ]  Backend "list my jobs" endpoint returns the caller's jobs (id, method, status, created, upload_id), per-user-isolated
-[  ]  A history list in the main window: past runs with status, method, timestamp, link to results
-[  ]  In-progress rows live-refresh; a user only sees their own jobs
-
-Out of Scope
-- Retention/cleanup (BE26)
-
-Notes: **Largely superseded by the Workspace UI overhaul** (the pinned Runs list + `GET api/jobs` = BE34 deliver this). Keep as the tracking ticket or fold into the overhaul.
-
-### FIMEVAL-FE18 — Evaluation parameters panel
+### FIMEVAL-FE36 — Evaluation parameters panel
 
 Description: The submit UI only picks a method. Framework knobs the library supports are
 hardcoded in the worker (bootstrap `sub_method`/`n_iterations`/`n_points`, `target_resolution`).
 Expose them as optional advanced parameters.
 
-[  ]  Advanced/optional params section in the submit flow (collapsed by default): bootstrap `sub_method` / `n_iterations` / `n_points`; optional `target_resolution` for all methods
+[  ]  Advanced/optional params section in the wizard (collapsed by default): bootstrap `sub_method` / `n_iterations` / `n_points`; optional `target_resolution` for all methods
 [  ]  Submit endpoint validates and threads them through `build_delayed` → `EvaluateFIM`
 [  ]  Defaults preserved when untouched; invalid values rejected with a clear message
-[  ]  Params surface in the run's Input details (ties into FE26)
+[  ]  Params surface in the run's Input Files details (ties into FE26)
 
 Out of Scope
 - Auto-tuning parameters
 
-Notes: Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33).
+Notes: Was mislabeled FE18 (which is the tracker's "Pre-staged Benchmark Upload UI"). Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33). Est: ~2–3 d.
 
 ### FIMEVAL-FE19 — Configurable, switchable basemaps
 
