@@ -36,3 +36,30 @@
 .rd-errbox p { margin: 0; color: var(--color-text); font-size: 0.9rem; white-space: pre-wrap; }
 
 @media (prefers-reduced-motion: reduce) { .rd-spinner { animation: none; } }
+
+.rd-rerun {
+  margin-left: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rd-rerun:hover { background: var(--color-surface-alt); }
+.rd-rerun:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.rd-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(10, 27, 52, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 1000;
+}
+.rd-modal {
+  background: var(--color-surface); border-radius: var(--radius-md); padding: 1.5rem;
+  max-width: 460px; width: 100%; box-shadow: var(--shadow-md);
+}
+.rd-modal-title { margin: 0 0 0.5rem; font-size: 1.1rem; }
+.rd-modal-body { margin: 0 0 1.25rem; color: var(--color-text-muted); line-height: 1.5; }
+.rd-modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; }

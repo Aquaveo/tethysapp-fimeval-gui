@@ -107,6 +107,10 @@ export default function ResultsView({ jobId }: { jobId: number }) {
   const headline = HEADLINE_METRICS
     .map((name) => ({ name, value: metricValue(name) }))
     .filter((h) => h.value !== null);
+  // A convenience download for the contingency raster (also in the file list).
+  const contingency = outputs.find(
+    (f) => /contingenc/i.test(f.name) && /\.tiff?$/i.test(f.name),
+  );
 
   return (
     <div className="results-step">
@@ -174,9 +178,16 @@ export default function ResultsView({ jobId }: { jobId: number }) {
             <div className="results-panel-title results-downloadall-title">Download results</div>
             <span className="results-downloadall-hint">All output files bundled into one ZIP.</span>
           </div>
-          <a className="button-primary results-download-all" href={downloadAllUrl(jobId)}>
-            Download Results (.zip)
-          </a>
+          <div className="results-download-buttons">
+            {contingency && (
+              <a className="button-secondary" href={downloadUrl(jobId, contingency.key)} download>
+                ⬇ Contingency map (GeoTIFF)
+              </a>
+            )}
+            <a className="button-primary results-download-all" href={downloadAllUrl(jobId)}>
+              Download Results (.zip)
+            </a>
+          </div>
         </div>
         <div className="results-panel-title">Individual files</div>
         <ul className="results-files">
