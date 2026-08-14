@@ -628,7 +628,7 @@ Out of Scope
 
 Notes: Builds on BE31's pre-clip (~8.5×); overlaps the earlier perf probe. Est: ~3–4 d.
 
-### FIMEVAL-FE37 — Separate Full Domain Methods from Bootstrap Sampling in the Wizard (+ defaults: Intersected Extent / Stratified)
+### FIMEVAL-FE37 — Split "Method" into Full Domain vs Bootstrap (+ new defaults)
 
 Description: Restructure the method step into two clearly-separated categories (per the
 desktop app): **Full Domain** (Convex Hull · AOI · Intersected Extent) — evaluates *all*
