@@ -636,7 +636,7 @@ pixels — and **Bootstrap** (Random · Stratified · Systematic) — *samples* 
 intersected analysis internally). **Remove Smallest Extent.**
 
 [  ]  Two visually-separated sections: "Full Domain" (3 methods) + "Bootstrap" (3 sampling approaches)
-[  ]  **Smallest Extent removed** from the picker
+[  ]  **Smallest Extent removed** from the picker **and** from the backend `VALID_METHODS` (rejected at submit if requested)
 [  ]  Defaults: **Full Domain = Intersected Extent**; **Bootstrap = Stratified**
 [  ]  Make clear to the user that **Bootstrap samples on top of the Intersected Extent full-domain analysis** run under the hood (that's the full-domain method bootstrap uses internally)
 [  ]  Choosing Bootstrap reveals the sampling picker; copy clarifies all-pixels vs sampled *and* names Intersected Extent as the underlying full-domain analysis
@@ -644,8 +644,9 @@ intersected analysis internally). **Remove Smallest Extent.**
 Out of Scope
 - `n_iterations` / `n_points` controls (FE36)
 
-Notes: Depends on BE36. ⚠ Confirm: remove Smallest Extent from the UI only, or from
-backend `VALID_METHODS` too? Est: ~2 d.
+Notes: Depends on BE36. Smallest Extent removed from **both** the UI and the backend
+`VALID_METHODS` (decided 2026-08-14) — so this ticket now has a small backend slice too.
+Est: ~2 d.
 
 ### FIMEVAL-FE38 — Reposition interface elements onto the main page
 
