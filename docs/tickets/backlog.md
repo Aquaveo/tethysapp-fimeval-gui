@@ -664,16 +664,16 @@ Notes: **Blocked** on the element list. Est: TBD (~0.5–1 d once scoped).
 
 ### FIMEVAL-FE39 — Improve logo visibility against the background
 
-Description: The logo reads poorly against the gray background; rethink its treatment for
-contrast/visibility.
+Description: The **FIMeval logo** in the header chrome reads poorly against the gray
+background; rethink its treatment for contrast/visibility.
 
-[  ]  Logo clearly legible against its background (adjust logo, backing, or placement)
+[  ]  The FIMeval logo is clearly legible against the header background (adjust logo, backing, or placement)
 [  ]  Works in the header chrome across sizes
 
 Out of Scope
 - Full rebrand
 
-Notes: Confirm which logo / where it sits on gray. Est: ~0.5 d.
+Notes: Target is the FIMeval header logo (confirmed 2026-08-14). Est: ~0.5 d.
 
 ### FIMEVAL-FE40 — Welcome / guidelines modal on page load
 
@@ -771,9 +771,11 @@ FP → Yellow**.
 
 [  ]  Recolor: **FN = Red**, **FP = Yellow** (backend colormap + frontend legend)
 [  ]  Per-class visibility toggles for TP / FP / FN / TN / Permanent Water
-[  ]  Rendering approach chosen for per-class visibility — per-class tile layers OR a client-side paint filter (the COG bakes class codes into one raster, so it's more than a CSS toggle)
+[  ]  Per-class visibility rendered **server-side (Approach A, decided 2026-08-14)**: pre-render the 5 single-class raster layers via the existing rio-tiler/COG pipeline and toggle their MapLibre visibility client-side — reuses the raster pipeline and avoids polygonization (chosen over a client-side vector/paint filter because this app is raster-heavy and OOM-sensitive; MapLibre raster layers can't filter by pixel value)
 
 Out of Scope
 - Per-class opacity
+- Client-side vector/polygonized tiles (rejected — see Approach A note)
 
-Notes: Extends FE20. The recolor half is trivial + can ship independently. Est: ~2–3 d.
+Notes: Extends FE20. The recolor half is trivial + can ship independently. Toggle lag is
+network-bound; mitigate by preloading the 5 single-class layers. Est: ~2–3 d.
