@@ -304,7 +304,7 @@ Expose them as optional advanced parameters.
 Out of Scope
 - Auto-tuning parameters
 
-Notes: Was mislabeled FE18 (which is the tracker's "Pre-staged Benchmark Upload UI"). Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33). Est: ~2–3 d.
+Notes: Was mislabeled FE18 (which is the tracker's "Pre-staged Benchmark Upload UI"). Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33). ⚠ **Depends on / overlaps BE36 + FE37:** BE36 already threads bootstrap `sub_method` through the backend and FE37 owns the Bootstrap grouping — if those land first (they're ahead in the queue), FE36 narrows to `n_iterations` / `n_points` / `target_resolution`; do **not** re-build the `sub_method` knob here. Est: ~2–3 d (less if BE36/FE37 ship first).
 
 ### FIMEVAL-FE19 — Configurable, switchable basemaps
 
@@ -733,7 +733,8 @@ sidecars), not only multi-file selection.
 Out of Scope
 - Reconstructing sidecars from a lone `.shp` (not possible)
 
-Notes: ⚠ "single shapefile" read as folder/zip (a lone `.shp` lacks its sidecars — confirm). Est: ~1–2 d.
+Notes: Confirmed 2026-08-14: "single shapefile" means a **folder or .zip bundle** — a lone
+`.shp` lacks its sidecars (`.shx`/`.dbf`/`.prj`) and can't stand alone. Est: ~1–2 d.
 
 ### FIMEVAL-FE44 — Consolidate the sidebar (Runs previews into the nav)
 
