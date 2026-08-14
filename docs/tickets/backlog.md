@@ -28,7 +28,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | BE32 | done | ~3 d |
 | BE33 | done | ~2.5 d |
 | BE34 | done | ~1 d |
-| BE35 | not started | ~1 d |
+| BE35 | ✅ done | ~1 d |
 | FE15 | done | ~5–6 d |
 | FE17 | ✅ done (via BE34 + FE28) | ~3 d |
 | ~~FE16~~ → FE35 | renumbered (FE16 is the tracker's) | — |
@@ -41,16 +41,30 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE24 | done | ~1 d |
 | FE25 | not started | ~1 d (UI only; + ~2–3 d backend storage-layout) |
 | FE26 | done | ~1 d |
-| FE27 | not started | ~3 d |
-| FE28 | not started | ~2 d |
-| FE29 | not started | ~3 d |
-| FE30 | not started | ~2 d |
-| FE31 | not started | ~2 d |
+| FE27 | ✅ done | ~3 d |
+| FE28 | ✅ done | ~2 d |
+| FE29 | ✅ done | ~3 d |
+| FE30 | ✅ done | ~2 d |
+| FE31 | ✅ done | ~2 d |
 | FE32 | done | ~1.5 d |
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
 | FE36 | not started (was FE18) | ~2–3 d |
+| BE36 | not started | ~1 d |
+| BE37 | not started | ~1.5 d |
+| BE38 | not started | ~0.25 d |
+| BE39 | not started | ~3–4 d |
+| FE37 | not started | ~2 d |
+| FE38 | blocked (scope TBD) | ~0.5–1 d |
+| FE39 | not started | ~0.5 d |
+| FE40 | not started | ~1 d |
+| FE41 | not started | ~1 d |
+| FE42 | not started | ~2–3 d |
+| FE43 | not started | ~1–2 d |
+| FE44 | not started | ~1 d |
+| FE45 | not started | ~1–1.5 d |
+| FE46 | not started | ~2–3 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -544,3 +558,220 @@ Out of Scope
 
 Notes: New. User wants a mock-up to sign off before build. Follow-up to the overhaul.
 User request 2026-08-12. Est: ~2–3 d.
+
+---
+
+## Method, Input & UI Refinements (2026-08 meetings + backlog sweep)
+
+From two rounds of meeting notes (evaluation-methodology; MVP/memory) plus a backlog
+sweep, 2026-08-13. Numbers continue *up* from the overhaul (last used FE36 / BE35);
+next free after this batch = **FE47 / BE40**. Meeting owners noted where assigned.
+
+### FIMEVAL-BE36 — Thread the bootstrap sampling approach; default to Stratified
+
+Description: The worker hardcodes `sub_method='random'` for bootstrap. Accept the chosen
+sampling approach (random / systematic / stratified) at submit and thread it to
+`EvaluateFIM`, defaulting to **stratified** (team decision).
+
+[  ]  Submit accepts `sub_method` ∈ {random, systematic, stratified}; validated; threaded via `build_delayed` → `EvaluateFIM`
+[  ]  Default = **stratified** when unspecified (replacing the hardcoded 'random')
+[  ]  Verified against fimeval that all three sub_methods run
+[  ]  TDD
+
+Out of Scope
+- `n_iterations` / `n_points` exposure (FE36)
+
+Notes: Pairs with FE37; a slice of / overlaps FE36. Est: ~1 d.
+
+### FIMEVAL-BE37 — Benchmark input validation: duplicate + "BM" naming convention
+
+Description: fimeval keys off a "BM" token to recognize the benchmark, so a duplicated or
+mis-named benchmark confuses it → the 5-min timeout. Validate benchmark inputs pre-run.
+
+[  ]  Reject a candidate byte-identical to the benchmark (and any two-benchmark case) with a clear message — no 5-min timeout
+[  ]  **Require a distinct "BM" token** in the benchmark filename (`_BM` / `BM_`, e.g. `BLE_2048397_BM` — NOT `BLEBM_24947028`); block if absent
+[  ]  **Warn if a *candidate* name contains `_BM` / `BM_`** → "Did you mean to add <file> as the Benchmark raster?"; block until changed
+[  ]  Surfaced in the wizard before submit where possible; enforced at submit; TDD
+
+Out of Scope
+- Deep raster content comparison beyond byte identity
+
+Notes: Owner Supath (meeting). Merges the meeting's duplicate-benchmark task + the user's
+BM-naming rules. Completes an unshipped BE29 criterion. Est: ~1.5 d.
+
+### FIMEVAL-BE38 — Raise the per-file upload cap to 2 GB
+
+Description: The team set a **2 GB per-file** ceiling (memory safeguard). Our default is 1 GB
+(`FIMEVAL_MAX_UPLOAD_BYTES`). Align it to 2 GB and keep the FE messaging consistent.
+
+[  ]  Per-file cap = 2 GB (default or env); enforced at presign/submit
+[  ]  The FE40 modal + upload validation quote **2 GB**
+[  ]  Still env-overridable
+
+Out of Scope
+- The working-set pixel guard (BE33) is unchanged
+
+Notes: Small. Est: ~0.25 d. Could fold into FE40.
+
+### FIMEVAL-BE39 — Reduce reproject/resample memory footprint to raise concurrency
+
+Description: The box is memory-limited to ~2 concurrent jobs; the **repro** and **resample**
+steps are the heaviest. Reduce their footprint (windowed/streaming reprojection, or
+pre-resampling inputs before fimeval — we don't modify fimeval) so more jobs fit.
+
+[  ]  Measure repro/resample peak RSS on representative inputs
+[  ]  Reduce it via our own pre-processing, verified metric-identical
+[  ]  Concurrency can rise above 2 on the same box; documented in the worker-sizing guide
+
+Out of Scope
+- New hardware / autoscaling
+
+Notes: Builds on BE31's pre-clip (~8.5×); overlaps the earlier perf probe. Est: ~3–4 d.
+
+### FIMEVAL-FE37 — Split "Method" into Full Domain vs Bootstrap (+ new defaults)
+
+Description: Restructure the method step into two clearly-separated categories (per the
+desktop app): **Full Domain** (Convex Hull · AOI · Intersected Extent) — evaluates *all*
+pixels — and **Bootstrap** (Random · Stratified · Systematic) — *samples* pixels (runs the
+intersected analysis internally). **Remove Smallest Extent.**
+
+[  ]  Two visually-separated sections: "Full Domain" (3 methods) + "Bootstrap" (3 sampling approaches)
+[  ]  **Smallest Extent removed** from the picker
+[  ]  Defaults: **Full Domain = Intersected Extent**; **Bootstrap = Stratified**
+[  ]  Choosing Bootstrap reveals the sampling picker; copy clarifies all-pixels vs sampled
+
+Out of Scope
+- `n_iterations` / `n_points` controls (FE36)
+
+Notes: Depends on BE36. ⚠ Confirm: remove Smallest Extent from the UI only, or from
+backend `VALID_METHODS` too? Est: ~2 d.
+
+### FIMEVAL-FE38 — Reposition interface elements onto the main page
+
+Description: Nathan asked that *specific* interface elements move to the main/dashboard area
+for consistency, validated by testing.
+
+[  ]  *(pending)* List the elements to reposition
+[  ]  Move them into the main dashboard area
+[  ]  Verify consistent behavior during testing
+
+Out of Scope
+- Broader layout redesign
+
+Notes: **Blocked** on the element list. Est: TBD (~0.5–1 d once scoped).
+
+### FIMEVAL-FE39 — Improve logo visibility against the background
+
+Description: The logo reads poorly against the gray background; rethink its treatment for
+contrast/visibility.
+
+[  ]  Logo clearly legible against its background (adjust logo, backing, or placement)
+[  ]  Works in the header chrome across sizes
+
+Out of Scope
+- Full rebrand
+
+Notes: Confirm which logo / where it sits on gray. Est: ~0.5 d.
+
+### FIMEVAL-FE40 — Welcome / guidelines modal on page load
+
+Description: A page-load modal that gives a broad "what FIMeval does" overview **and** the
+file requirements users need before submitting — formats, the **2 GB limit**, resolution
+guidance, and target CRS — to preempt size/memory failures.
+
+[  ]  Modal appears on first load: app overview + file guidelines (formats, 2 GB, resolution, target CRS)
+[  ]  Dismissible; doesn't reappear every navigation (session/localStorage), with a way to reopen
+[  ]  Accessible (focus trap, escape/close)
+
+Out of Scope
+- Per-user server-side "seen it" tracking
+
+Notes: Owner Reshma (meeting). Merges the meeting's guidelines modal + the app-overview idea. Est: ~1 d.
+
+### FIMEVAL-FE41 — "Re-evaluate" (rename Re-run) → wizard with same inputs, jump to Method
+
+Description: Rename **Re-run → "Re-evaluate"**. Instead of resubmitting the same config, it
+opens **New Evaluation** pre-loaded with the run's input files and **jumps to the Method
+step**, so the user picks a different method/sampling without re-uploading.
+
+[  ]  Button reads "Re-evaluate"
+[  ]  Opens the wizard pre-filled from the run's `upload_id`, starting at the Method step
+[  ]  User changes method/sampling and submits, re-using the existing upload (no re-upload)
+[  ]  The too-large/downsample modal still applies
+
+Out of Scope
+- Editing the input files themselves (re-upload is a fresh New Evaluation)
+
+Notes: Changes the shipped FE31 behavior. Est: ~1 d.
+
+### FIMEVAL-FE42 — Candidate raster: folder & .zip upload
+
+Description: Let users add candidates as a selected **folder** (all GeoTIFFs within) or a
+**.zip** (unzip → GeoTIFFs), each checked against the benchmark — in addition to picking
+individual files.
+
+[  ]  Folder select adds all `.tif`/`.tiff` within as candidates
+[  ]  `.zip` is unzipped (client or server) and its GeoTIFFs added as candidates
+[  ]  Non-GeoTIFF entries ignored with a note; per-file limits + BE37 naming checks still apply
+
+Out of Scope
+- Nested archives
+
+Notes: FE + BE (presign flow / unzip). Est: ~2–3 d.
+
+### FIMEVAL-FE43 — AOI shapefile: folder / .zip upload
+
+Description: Accept the AOI shapefile bundle as a **.zip** or a selected **folder** (all
+sidecars), not only multi-file selection.
+
+[  ]  `.zip` of shapefile parts accepted → extracted (`.shp`/`.shx`/`.dbf`/`.prj`…)
+[  ]  Folder select accepted
+[  ]  Validates a `.shp` + required sidecars are present; clear error otherwise
+
+Out of Scope
+- Reconstructing sidecars from a lone `.shp` (not possible)
+
+Notes: ⚠ "single shapefile" read as folder/zip (a lone `.shp` lacks its sidecars — confirm). Est: ~1–2 d.
+
+### FIMEVAL-FE44 — Consolidate the sidebar (Runs previews into the nav)
+
+Description: The left nav is sparse (＋New / Documentation / signed-in). Merge the **Runs
+previews into it** so the left column is one useful sidebar and the detail pane gets more width.
+
+[  ]  Left sidebar shows ＋New Evaluation, the Runs previews (status · method · time), and Documentation / signed-in
+[  ]  Selecting a run still opens it in the detail pane; polling + highlight preserved
+[  ]  Detail pane gains the reclaimed width
+
+Out of Scope
+- Mobile restack (FE33)
+
+Notes: Refines the FE27 shell (drops the separate 3rd column). Est: ~1 d.
+
+### FIMEVAL-FE45 — Two-column results layout
+
+Description: Lay results out in two columns so the contingency map and the box-plot/metrics
+table are visible **without scrolling**.
+
+[  ]  Results use a responsive two-column grid (e.g. map one side, box-plot/metrics the other)
+[  ]  Key outputs visible without scrolling on a typical screen; collapses to one column when narrow
+[  ]  Preserves the FE21 emphasis (map prominent)
+
+Out of Scope
+- Per-user layout persistence
+
+Notes: Refines ResultsView (FE30). Est: ~1–1.5 d.
+
+### FIMEVAL-FE46 — Contingency map class controls (per-class visibility + recolor)
+
+Description: Add **per-class visibility toggles** on the contingency map (TP · FP · FN · TN ·
+Permanent Water) so a user can isolate, e.g., only False Positives; and **recolor FN → Red,
+FP → Yellow**.
+
+[  ]  Recolor: **FN = Red**, **FP = Yellow** (backend colormap + frontend legend)
+[  ]  Per-class visibility toggles for TP / FP / FN / TN / Permanent Water
+[  ]  Rendering approach chosen for per-class visibility — per-class tile layers OR a client-side paint filter (the COG bakes class codes into one raster, so it's more than a CSS toggle)
+
+Out of Scope
+- Per-class opacity
+
+Notes: Extends FE20. The recolor half is trivial + can ship independently. Est: ~2–3 d.
