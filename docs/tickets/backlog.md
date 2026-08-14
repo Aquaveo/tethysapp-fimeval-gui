@@ -638,7 +638,8 @@ intersected analysis internally). **Remove Smallest Extent.**
 [  ]  Two visually-separated sections: "Full Domain" (3 methods) + "Bootstrap" (3 sampling approaches)
 [  ]  **Smallest Extent removed** from the picker
 [  ]  Defaults: **Full Domain = Intersected Extent**; **Bootstrap = Stratified**
-[  ]  Choosing Bootstrap reveals the sampling picker; copy clarifies all-pixels vs sampled
+[  ]  Make clear to the user that **Bootstrap samples on top of the Intersected Extent full-domain analysis** run under the hood (that's the full-domain method bootstrap uses internally)
+[  ]  Choosing Bootstrap reveals the sampling picker; copy clarifies all-pixels vs sampled *and* names Intersected Extent as the underlying full-domain analysis
 
 Out of Scope
 - `n_iterations` / `n_points` controls (FE36)
