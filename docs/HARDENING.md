@@ -66,7 +66,8 @@ Dask worker's and Django's environment (both processes read them).
 | `FIMEVAL_MAX_CANDIDATES` | `10` | Candidate rasters accepted per job |
 | `FIMEVAL_MAX_UPLOAD_BYTES` | `1073741824` (1 GB) | Per-file upload size |
 | `FIMEVAL_MAX_EVAL_PIXELS` | `200000000` (200 Mpx) | Benchmark pixel budget the input guard enforces |
-| `FIMEVAL_JOB_TIMEOUT_SECONDS` | `1800` (30 min) | Wall-clock age after which a stuck job is reported as a terminal error |
+| `FIMEVAL_JOB_TIMEOUT_SECONDS` | `1800` (30 min) | Wall-clock age after which a *running* job is reported as a terminal error |
+| `FIMEVAL_JOB_START_TIMEOUT_SECONDS` | `120` (2 min) | Age after which a job no worker has started (still queued/submitted, no `_RUNNING` marker) fails fast — separate from the running timeout so heavy runs aren't cut off |
 | `FIMEVAL_TARGET_CRS` | `EPSG:5070` | CRS fimeval reprojects all inputs to (CONUS Albers) |
 
 ## Notes on current safeguards (already in place)

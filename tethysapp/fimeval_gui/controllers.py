@@ -532,6 +532,11 @@ _TETHYS_TO_STATUS = {
 # deployment (long-running pools may want a higher ceiling).
 _JOB_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_TIMEOUT_SECONDS', 30 * 60)
 
+# A much shorter ceiling for a job no worker ever picked up — still queued/submitted
+# with no _RUNNING marker (e.g. the Dask worker is down, or the pool is saturated).
+# Kept separate from the running timeout so a legitimate heavy run isn't cut off (BE35).
+_JOB_START_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_START_TIMEOUT_SECONDS', 120)
+
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
 def api_job_status(request, job_id):
@@ -598,11 +603,19 @@ def api_job_status(request, job_id):
     # Wall-clock safety net: a running job that never reached a terminal state
     # is reported as a terminal error past the timeout so the UI stops polling.
     timed_out = False
+    never_started = False
     if status == 'running' and job.creation_time:
         age = (timezone.now() - job.creation_time).total_seconds()
         if age > _JOB_TIMEOUT_SECONDS:
             status = 'error'
             timed_out = True
+    # Never-started net (BE35): still queued/submitted with no _RUNNING marker means
+    # no worker took it — fail fast, long before the running timeout above.
+    elif status in ('queued', 'submitted') and job.creation_time:
+        age = (timezone.now() - job.creation_time).total_seconds()
+        if age > _JOB_START_TIMEOUT_SECONDS:
+            status = 'error'
+            never_started = True
 
     # On failure, surface the reason the worker wrote into the _FAILED marker
     # (fimeval's captured error) so the UI can show it instead of a generic
@@ -622,6 +635,11 @@ def api_job_status(request, job_id):
                 ) or None
             except (ClientError, BotoCoreError, KeyError) as exc:
                 logger.warning('Failed to read _FAILED reason for job %s: %s', job_id, exc)
+        if reason is None and never_started:
+            reason = (
+                'No worker picked this evaluation up in time — the Dask worker '
+                'may not be running. Start it and submit again.'
+            )
         if reason is None and timed_out:
             reason = (
                 'Evaluation did not complete in time — the worker may have run '
