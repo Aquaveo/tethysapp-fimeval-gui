@@ -52,6 +52,13 @@
 }
 
 /* Method cards */
+/* Re-evaluate banner (FE41) — inputs reused, no re-upload. */
+.ne-reuse-note {
+  margin-bottom: 1rem; padding: 0.6rem 0.8rem;
+  background: var(--color-surface-alt); border: 1px solid var(--color-border);
+  border-radius: 8px; font-size: 0.85rem; color: var(--color-text);
+}
+
 /* Method groups (FE37): "Full Domain" vs "Bootstrap". */
 .ne-mgroup { margin-bottom: 1.1rem; }
 .ne-mgroup:last-of-type { margin-bottom: 0; }
