@@ -312,10 +312,13 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
-    def _submit(self, upload_id, method='smallest_extent', downsample=False):
+    def _submit(self, upload_id, method='smallest_extent', downsample=False,
+                sub_method=None):
         payload = {'upload_id': upload_id, 'method': method}
         if downsample:
             payload['downsample'] = True
+        if sub_method is not None:
+            payload['sub_method'] = sub_method
         return self.client.post(
             '/apps/fimeval-gui/api/jobs/',
             data=json.dumps(payload),
@@ -393,6 +396,38 @@ class TestSubmitEndpoint(TethysTestCase):
         # The chosen fit resolution is threaded to the job so the worker actually
         # coarsens (otherwise "Accept" would OOM again).
         self.assertEqual(self.mock_job.extended_properties['target_resolution'], 30.0)
+
+    def test_submit_bootstrap_defaults_to_stratified(self):
+        # BE36: when no sampling approach is given, bootstrap defaults to
+        # stratified (replacing the previously hardcoded 'random').
+        self._put_upload('u_bs')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_bs', method='bootstrap')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.mock_job.extended_properties['sub_method'], 'stratified')
+
+    def test_submit_accepts_each_valid_sub_method(self):
+        for sm in ('random', 'systematic', 'stratified'):
+            self._put_upload(f'u_{sm}')
+            with patch(
+                'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+                return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+            ):
+                response = self._submit(f'u_{sm}', method='bootstrap', sub_method=sm)
+            self.assertEqual(response.status_code, 202, sm)
+            self.assertEqual(self.mock_job.extended_properties['sub_method'], sm)
+
+    def test_submit_rejects_invalid_sub_method(self):
+        self._put_upload('u_badsm')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_badsm', method='bootstrap', sub_method='bogus')
+        self.assertEqual(response.status_code, 400)
 
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')

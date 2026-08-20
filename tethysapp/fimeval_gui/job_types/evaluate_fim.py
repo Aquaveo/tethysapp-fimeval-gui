@@ -189,15 +189,16 @@ def _read_vector_crs(shp_path):
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict,
-                          target_resolution=None):
+                          target_resolution=None, sub_method='stratified'):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
     Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
     into a case-study dir; any AOI shapefile into a separate dir), runs
     ``fimeval.EvaluateFIM`` for ``method`` — reprojecting to ``TARGET_CRS``, with
-    ``sub_method='random'`` for bootstrap and ``shapefile_dir`` for AOI — uploads
-    all outputs to ``outputs/<user_id>/<upload_id>/``, then writes a terminal
-    ``_SUCCESS`` / ``_FAILED`` marker as its final action.
+    the chosen bootstrap ``sub_method`` (default ``stratified``) for bootstrap and
+    ``shapefile_dir`` for AOI — uploads all outputs to
+    ``outputs/<user_id>/<upload_id>/``, then writes a terminal ``_SUCCESS`` /
+    ``_FAILED`` marker as its final action.
 
     Raises ``RuntimeError`` if no ``EvaluationMetrics.csv`` was produced, so the
     Dask future errors and the job is reported failed rather than hanging.
@@ -318,10 +319,17 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         os.makedirs(output_dir)
         # EvaluateFIM's sub_method defaults to None and forwards it into
         # run_bootstrap, which calls sub_method.lower() and crashes. Pass the
-        # library's own documented default ('random') so bootstrap runs; the
+        # chosen sampling approach (default 'stratified') so bootstrap runs; the
         # other methods ignore sub_method. n_iterations/n_points stay at fimeval
         # defaults (100/500).
-        extra = {'sub_method': 'random'} if method == 'bootstrap' else {}
+        extra = {}
+        if method == 'bootstrap':
+            extra['sub_method'] = sub_method
+            # Systematic sampling requires a spacing_range or run_bootstrap
+            # raises ValueError. Supply fimeval's documented default so the job
+            # runs; FE36 will expose this as a knob.
+            if sub_method == 'systematic':
+                extra['spacing_range'] = (100, 1000)
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
@@ -388,4 +396,5 @@ class EvaluateFIMJobType(JobType):
             params['method'],
             params['s3_config'],
             target_resolution=params.get('target_resolution'),
+            sub_method=params.get('sub_method') or 'stratified',
         )

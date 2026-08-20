@@ -112,6 +112,68 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')
+    def test_bootstrap_defaults_to_stratified_sub_method(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG)
+
+        # BE36: the default sampling approach is stratified (was hardcoded 'random').
+        self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'stratified')
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_sub_method_forwarded_to_fimeval(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG, sub_method='random')
+
+        self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'random')
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_systematic_sub_method_gets_default_spacing_range(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG, sub_method='systematic')
+
+        # fimeval's run_bootstrap raises without spacing_range for systematic, so
+        # supply its documented default (100, 1000) so the job actually runs.
+        self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'systematic')
+        self.assertEqual(mock_eval.call_args.kwargs.get('spacing_range'), (100, 1000))
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_non_bootstrap_ignores_sub_method(self, mock_eval):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', S3_CONFIG, sub_method='random')
+
+        # sub_method only applies to bootstrap; other methods must not receive it.
+        self.assertIsNone(mock_eval.call_args.kwargs.get('sub_method'))
+        self.assertIsNone(mock_eval.call_args.kwargs.get('spacing_range'))
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
     def test_no_metrics_writes_failed_marker_and_raises(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
@@ -361,27 +423,6 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         # shapefile_dir points at the downloaded .shp and the file exists.
         self.assertTrue(captured['shapefile_dir'].endswith('aoi.shp'))
         self.assertTrue(captured['shp_exists'])
-
-    @mock_aws
-    @patch('fimeval.EvaluateFIM')
-    def test_bootstrap_passes_sub_method_random(self, mock_eval):
-        s3 = boto3.client('s3', region_name='us-east-1')
-        s3.create_bucket(Bucket=BUCKET)
-        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
-        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
-
-        def fake_eval(main_dir, method, output_dir, **kwargs):
-            _emit_success_outputs(output_dir)
-
-        mock_eval.side_effect = fake_eval
-
-        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
-        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG)
-
-        self.assertEqual(mock_eval.call_args.args[1], 'bootstrap')
-        # EvaluateFIM's sub_method default (None) crashes run_bootstrap; the worker
-        # must pass 'random' so bootstrap runs.
-        self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'random')
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')

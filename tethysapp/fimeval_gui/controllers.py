@@ -418,6 +418,8 @@ def api_upload_presign(request):
 
 
 VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
+# Bootstrap sampling approaches fimeval's run_bootstrap accepts (BE36).
+VALID_SUB_METHODS = {'random', 'systematic', 'stratified'}
 
 # Control-plane objects the worker writes to the output prefix (terminal markers
 # + the input-metadata file + the internal contingency tiling COG); not
@@ -477,6 +479,15 @@ def api_jobs_submit(request):
         return JsonResponse({'error': 'upload_id is required'}, status=400)
     if method not in VALID_METHODS:
         return JsonResponse({'error': f'method must be one of {sorted(VALID_METHODS)}'}, status=400)
+
+    # Bootstrap sampling approach (BE36). Only meaningful for the bootstrap
+    # method; ignored by the others. Defaults to 'stratified' when unspecified.
+    sub_method = body.get('sub_method') or 'stratified'
+    if sub_method not in VALID_SUB_METHODS:
+        return JsonResponse(
+            {'error': f'sub_method must be one of {sorted(VALID_SUB_METHODS)}'},
+            status=400,
+        )
 
     user_id = str(request.user.id)
     storage = _get_storage()
@@ -572,10 +583,11 @@ def api_jobs_submit(request):
         'user_id': user_id,
         'method': method,
         'target_resolution': target_resolution,
+        'sub_method': sub_method,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
-        target_resolution=target_resolution,
+        target_resolution=target_resolution, sub_method=sub_method,
     )
 
     try:
