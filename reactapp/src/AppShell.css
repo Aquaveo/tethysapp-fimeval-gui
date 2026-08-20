@@ -93,6 +93,12 @@
   text-decoration: none;
   font-size: 0.92rem;
 }
+/* The "Guidelines" nav entry is a <button> (opens the modal); reset it to look
+   like the NavLink items. */
+.wk-nav-btn {
+  width: 100%; border: none; background: transparent; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
 .wk-nav-item:hover { background: rgba(255, 255, 255, 0.12); }
 .wk-nav-item.is-active { background: rgba(255, 255, 255, 0.18); color: #fff; font-weight: 600; }
 /* Sits at the sidebar's bottom, over the FilterSidebar white swoosh → dark text. */
