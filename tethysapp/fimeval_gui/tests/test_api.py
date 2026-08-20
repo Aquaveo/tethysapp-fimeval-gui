@@ -312,7 +312,7 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
-    def _submit(self, upload_id, method='smallest_extent', downsample=False,
+    def _submit(self, upload_id, method='intersected_extent', downsample=False,
                 sub_method=None):
         payload = {'upload_id': upload_id, 'method': method}
         if downsample:
@@ -433,7 +433,7 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_upload('u1')
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'u1', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 202)
@@ -457,6 +457,12 @@ class TestSubmitEndpoint(TethysTestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_submit_rejects_smallest_extent(self):
+        # FE37: Smallest Extent is removed from the offered methods and from the
+        # backend VALID_METHODS, so a submit requesting it is rejected.
+        self._put_upload('u_se')
+        self.assertEqual(self._submit('u_se', method='smallest_extent').status_code, 400)
 
     def test_submit_accepts_bootstrap(self):
         self._put_upload('u_bs')
@@ -506,7 +512,7 @@ class TestSubmitEndpoint(TethysTestCase):
     def test_submit_rejects_missing_upload_id(self):
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'method': 'smallest_extent'}),
+            data=json.dumps({'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 400)
@@ -514,7 +520,7 @@ class TestSubmitEndpoint(TethysTestCase):
     def test_submit_returns_404_for_unknown_upload_id(self):
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'nonexistent', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'nonexistent', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 404)
@@ -528,7 +534,7 @@ class TestSubmitEndpoint(TethysTestCase):
         client = self.get_test_client()  # not logged in
         response = client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'u1', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertIn(response.status_code, [302, 403])

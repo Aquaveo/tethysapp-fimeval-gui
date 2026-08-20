@@ -8,18 +8,37 @@ import Dropzone from './Dropzone';
 import { presignUpload, putFile, submitJob, SubmitTooLargeError, type TooLargeInfo } from './api';
 import './NewEvaluation.css';
 
-type Method = 'smallest_extent' | 'convex_hull' | 'intersected_extent' | 'bootstrap' | 'AOI';
+// Full Domain methods evaluate *every* pixel in the chosen domain; Bootstrap
+// *samples* pixels (on top of the Intersected Extent analysis) to build a
+// distribution for each metric. Smallest Extent was removed (FE37).
+type Method = 'convex_hull' | 'intersected_extent' | 'bootstrap' | 'AOI';
+type SubMethod = 'random' | 'stratified' | 'systematic';
 type FileProgress = { name: string; pct: number; failed: boolean };
 
 const SHAPEFILE_EXTS = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'];
 
-const METHODS: { value: Method; label: string; desc: string }[] = [
-  { value: 'bootstrap', label: 'Bootstrap (random sampling)', desc: 'Resampled distribution of each metric — shows the box-plot.' },
-  { value: 'smallest_extent', label: 'Smallest extent', desc: 'Evaluate over the overlapping extent of the inputs.' },
-  { value: 'convex_hull', label: 'Convex hull', desc: 'Evaluate within the convex hull of the wet cells.' },
-  { value: 'intersected_extent', label: 'Intersected extent', desc: 'Evaluate only where both maps have data.' },
-  { value: 'AOI', label: 'Area of interest (AOI)', desc: 'Evaluate inside an uploaded boundary shapefile.' },
+// The three "Full Domain" methods (all evaluate every pixel). Intersected
+// Extent is the default.
+const FULL_DOMAIN: { value: Method; label: string; desc: string }[] = [
+  { value: 'intersected_extent', label: 'Intersected Extent', desc: 'Evaluate every pixel where both maps have data. (Default)' },
+  { value: 'convex_hull', label: 'Convex Hull', desc: 'Evaluate all pixels within the convex hull of the wet cells.' },
+  { value: 'AOI', label: 'Area of Interest (AOI)', desc: 'Evaluate all pixels inside an uploaded boundary shapefile.' },
 ];
+
+// Bootstrap sampling approaches. Stratified is the default.
+const SAMPLING: { value: SubMethod; label: string; desc: string }[] = [
+  { value: 'stratified', label: 'Stratified', desc: 'Sample proportionally across strata. (Default)' },
+  { value: 'random', label: 'Random', desc: 'Uniform random sample of points each iteration.' },
+  { value: 'systematic', label: 'Systematic', desc: 'Sample on a randomized grid spacing each iteration.' },
+];
+
+function methodSummary(method: Method, subMethod: SubMethod): string {
+  if (method === 'bootstrap') {
+    const s = SAMPLING.find((x) => x.value === subMethod)?.label ?? subMethod;
+    return `Bootstrap — ${s} sampling`;
+  }
+  return FULL_DOMAIN.find((m) => m.value === method)?.label ?? method;
+}
 
 function mergeUnique(prev: File[], incoming: File[]): File[] {
   const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
@@ -32,13 +51,15 @@ export default function NewEvaluation() {
   const [benchmark, setBenchmark] = useState<File | null>(null);
   const [candidates, setCandidates] = useState<File[]>([]);
   const [boundary, setBoundary] = useState<File[]>([]);
-  const [method, setMethod] = useState<Method>('bootstrap');
+  const [method, setMethod] = useState<Method>('intersected_extent');
+  const [subMethod, setSubMethod] = useState<SubMethod>('stratified');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<FileProgress[] | null>(null);
   const [tooLarge, setTooLarge] = useState<{ info: TooLargeInfo; uploadId: string } | null>(null);
 
   const isAOI = method === 'AOI';
+  const isBootstrap = method === 'bootstrap';
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
   const step1Valid = benchmark !== null && candidates.length > 0;
   const step2Valid = !isAOI || hasShp;
@@ -90,7 +111,9 @@ export default function NewEvaluation() {
         ),
       );
 
-      const { job_id } = await submitJob(upload_id, method);
+      const { job_id } = await submitJob(
+        upload_id, method, false, isBootstrap ? subMethod : undefined,
+      );
       navigate(`/runs/${job_id}`);
     } catch (e) {
       if (e instanceof SubmitTooLargeError && uploadId) {
@@ -112,7 +135,9 @@ export default function NewEvaluation() {
     setError(null);
     setSubmitting(true);
     try {
-      const { job_id } = await submitJob(uploadId, method, true);
+      const { job_id } = await submitJob(
+        uploadId, method, true, isBootstrap ? subMethod : undefined,
+      );
       navigate(`/runs/${job_id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Submission failed. Please try again.');
@@ -180,19 +205,60 @@ export default function NewEvaluation() {
 
         {step === 2 && (
           <div className="ne-body">
-            <div className="ne-methods">
-              {METHODS.map((m) => (
-                <button key={m.value} type="button"
-                  className={`ne-method${method === m.value ? ' sel' : ''}`}
-                  onClick={() => setMethod(m.value)}>
+            <section className="ne-mgroup">
+              <h4 className="ne-mgroup-title">Full Domain</h4>
+              <p className="ne-mgroup-sub">Evaluate <strong>every pixel</strong> in the chosen domain.</p>
+              <div className="ne-methods">
+                {FULL_DOMAIN.map((m) => (
+                  <button key={m.value} type="button"
+                    className={`ne-method${method === m.value ? ' sel' : ''}`}
+                    onClick={() => setMethod(m.value)}>
+                    <span className="ne-mradio" aria-hidden="true" />
+                    <span>
+                      <span className="ne-mt">{m.label}</span>
+                      <span className="ne-md">{m.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="ne-mgroup">
+              <h4 className="ne-mgroup-title">Bootstrap</h4>
+              <p className="ne-mgroup-sub">
+                <strong>Sample</strong> pixels many times to build a distribution for each metric (shown as box-plots).
+                Runs on top of the <strong>Intersected Extent</strong> full-domain analysis.
+              </p>
+              <div className="ne-methods">
+                <button type="button"
+                  className={`ne-method${isBootstrap ? ' sel' : ''}`}
+                  onClick={() => setMethod('bootstrap')}>
                   <span className="ne-mradio" aria-hidden="true" />
                   <span>
-                    <span className="ne-mt">{m.label}</span>
-                    <span className="ne-md">{m.desc}</span>
+                    <span className="ne-mt">Bootstrap</span>
+                    <span className="ne-md">Resampled distribution of each metric.</span>
                   </span>
                 </button>
-              ))}
-            </div>
+              </div>
+              {isBootstrap && (
+                <div className="ne-subsampling">
+                  <span className="ne-label">Sampling approach</span>
+                  <div className="ne-methods">
+                    {SAMPLING.map((s) => (
+                      <button key={s.value} type="button"
+                        className={`ne-method${subMethod === s.value ? ' sel' : ''}`}
+                        onClick={() => setSubMethod(s.value)}>
+                        <span className="ne-mradio" aria-hidden="true" />
+                        <span>
+                          <span className="ne-mt">{s.label}</span>
+                          <span className="ne-md">{s.desc}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
             {isAOI && (
               <div className="ne-aoi">
                 <span className="ne-label">AOI boundary shapefile (all parts)</span>
@@ -224,7 +290,7 @@ export default function NewEvaluation() {
             {isAOI && (
               <div className="ne-review-row"><span className="ne-k">Boundary</span><span>{boundary.map((b) => b.name).join(', ')}</span></div>
             )}
-            <div className="ne-review-row"><span className="ne-k">Method</span><span>{METHODS.find((m) => m.value === method)?.label}</span></div>
+            <div className="ne-review-row"><span className="ne-k">Method</span><span>{methodSummary(method, subMethod)}</span></div>
           </div>
         )}
       </div>

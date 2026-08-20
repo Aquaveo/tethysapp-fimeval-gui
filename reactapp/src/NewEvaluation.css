@@ -52,6 +52,18 @@
 }
 
 /* Method cards */
+/* Method groups (FE37): "Full Domain" vs "Bootstrap". */
+.ne-mgroup { margin-bottom: 1.1rem; }
+.ne-mgroup:last-of-type { margin-bottom: 0; }
+.ne-mgroup-title {
+  margin: 0 0 0.15rem; font-size: 0.95rem; font-weight: 700; color: var(--color-text);
+}
+.ne-mgroup-sub { margin: 0 0 0.6rem; font-size: 0.82rem; color: var(--color-text-muted); }
+/* Revealed sampling picker under Bootstrap. */
+.ne-subsampling {
+  margin-top: 0.7rem; padding-left: 0.9rem;
+  border-left: 2px solid var(--color-border);
+}
 .ne-methods { display: flex; flex-direction: column; gap: 0.55rem; }
 .ne-method {
   display: flex; gap: 0.7rem; align-items: flex-start; text-align: left;

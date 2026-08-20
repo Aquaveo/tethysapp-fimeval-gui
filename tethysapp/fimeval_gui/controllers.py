@@ -417,7 +417,9 @@ def api_upload_presign(request):
     return JsonResponse({'upload_id': upload_id, 'targets': targets})
 
 
-VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
+# Smallest Extent was removed (FE37) — the UI no longer offers it and the backend
+# rejects it. Full Domain = convex_hull / intersected_extent / AOI; sampling = bootstrap.
+VALID_METHODS = {'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 # Bootstrap sampling approaches fimeval's run_bootstrap accepts (BE36).
 VALID_SUB_METHODS = {'random', 'systematic', 'stratified'}
 
