@@ -134,7 +134,7 @@ def _env_int(name, default):
 # can size them to its worker pool / storage without editing code.
 RASTER_EXT = {'.tif', '.tiff'}
 MAX_CANDIDATES = _env_int('FIMEVAL_MAX_CANDIDATES', 10)
-MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 1024 * 1024 * 1024)  # 1 GB/file
+MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 2 * 1024 * 1024 * 1024)  # 2 GB/file (BE38)
 
 # The worker clips candidates to the benchmark extent (BE31), so the benchmark's
 # own pixel count bounds the working memory. A benchmark above this budget would

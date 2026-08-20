@@ -149,6 +149,11 @@ class TestUploadEndpoint(TethysTestCase):
             _validate_upload(SimpleNamespace(name='big.tif', size=MAX_UPLOAD_BYTES + 1), RASTER_EXT)
         )
 
+    def test_default_upload_cap_is_2gb(self):
+        # BE38: the team set a 2 GB per-file ceiling (env-overridable).
+        from tethysapp.fimeval_gui.controllers import MAX_UPLOAD_BYTES
+        self.assertEqual(MAX_UPLOAD_BYTES, 2 * 1024 * 1024 * 1024)
+
     def test_upload_stores_benchmark_in_s3(self):
         benchmark = SimpleUploadedFile('benchmark_2024.tif', b'bench data', content_type='image/tiff')
         candidate = SimpleUploadedFile('candidate_A.tif', b'cand data', content_type='image/tiff')
