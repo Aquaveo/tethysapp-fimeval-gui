@@ -65,6 +65,8 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE44 | not started | ~1 d |
 | FE45 | not started | ~1–1.5 d |
 | FE46 | not started | ~2–3 d |
+| BE40 | not started | ~1 d |
+| BE41 | not started | ~5–7 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -780,3 +782,47 @@ Out of Scope
 
 Notes: Extends FE20. The recolor half is trivial + can ship independently. Toggle lag is
 network-bound; mitigate by preloading the 5 single-class layers. Est: ~2–3 d.
+
+---
+
+## Review follow-ups (Nathan / swainn PR comments)
+
+Open items from the boss's merged-PR reviews (the rest were addressed in-thread).
+Numbers provisional — confirm against the tracker.
+
+### FIMEVAL-BE40 — Rename the remaining minio_* settings to generic S3 names
+
+Description: PR #4 follow-up. Only `minio_public_endpoint_url` was renamed (→
+`s3_public_endpoint_url`); three settings still reference minio (a dev tool) in
+`app.py`: `minio_endpoint_url`, `minio_access_key`, `minio_secret_key`. Rename to
+generic S3 names and update all references. This is a **breaking change** for
+existing deployments (the setting names change), so it needs a migration path.
+
+[  ]  Rename `minio_endpoint_url` → `s3_endpoint_url`, `minio_access_key` → `s3_access_key`, `minio_secret_key` → `s3_secret_key` in `app.py`; descriptions no longer mention minio
+[  ]  Update every reference (`controllers.py` `s3_config`, `storage.py`, tests, docs)
+[  ]  Migration note (README / HARDENING): deployments must re-enter these under the new names — or add a temporary fallback that reads the old names and warns
+[  ]  Tests green
+
+Out of Scope
+- The already-done `s3_public_endpoint_url` rename
+
+Notes: Nathan, PR #4 (2026-07). Breaking — coordinate the deployment setting update. Est: ~1 d.
+
+### FIMEVAL-BE41 — Push live job status over WebSockets (replace polling)
+
+Description: PR #1 follow-up. The Runs list and run-detail views poll
+`GET api/jobs` / the status endpoint every few seconds. Replace that with
+server-pushed updates (Django Channels / ASGI WebSocket consumer over the existing
+Daphne stack) so a running job's status streams to the frontend; keep polling as a
+fallback if the socket drops.
+
+[  ]  Backend WebSocket endpoint pushes per-user job status transitions (queued → running → complete/error)
+[  ]  Frontend subscribes and updates the Runs list + run detail live; falls back to polling on disconnect
+[  ]  Auth + per-user ownership enforced on the socket (no cross-user leakage)
+[  ]  ASGI/Channels routing documented (deployment notes)
+
+Out of Scope
+- Streaming full result payloads over the socket (results still fetched on demand)
+
+Notes: Nathan, PR #1 (2026-07) — flagged as a "pretty big refactor," not required
+at the time. Backend-led with a frontend consumer. Est: ~5–7 d.
