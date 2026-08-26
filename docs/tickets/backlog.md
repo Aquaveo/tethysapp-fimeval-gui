@@ -67,6 +67,8 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE46 | not started | ~2–3 d |
 | BE40 | not started | ~1 d |
 | BE41 | not started | ~5–7 d |
+| BE42 | not started | ~1 d |
+| FE48 | not started | ~1–1.5 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -826,3 +828,47 @@ Out of Scope
 
 Notes: Nathan, PR #1 (2026-07) — flagged as a "pretty big refactor," not required
 at the time. Backend-led with a frontend consumer. Est: ~5–7 d.
+
+---
+
+## Desktop-app parity (functionality the web app is missing)
+
+Gaps found comparing the desktop FIMeval GUI (`random/FIMeval/fimpef_final/gui.py`)
+against the web app, 2026-08-26. Numbers provisional — confirm against the tracker.
+
+### FIMEVAL-BE42 — Accept a user-chosen target CRS + resolution at submit
+
+Description: The worker always reprojects to a fixed `EPSG:5070` (env `TARGET_CRS`) and
+only sets `target_resolution` via the size-guard downsample path. The desktop app lets the
+user set both up front (`gui.py` "Target CRS" default EPSG:5070, "Target Resolution (m)"
+default 10, blank = coarsest). `EvaluateFIM` already accepts `target_crs` /
+`target_resolution` — this ticket just plumbs user-chosen values through submit. Backend
+half of FE48; raised by Dipsikha (her desktop app has it).
+
+[  ]  Submit accepts optional `target_crs` (validated, e.g. via pyproj) and `target_resolution` (positive number); defaults preserved when unset (EPSG:5070 / coarsest input)
+[  ]  Threaded via `extended_properties` + `build_delayed` → `run_evaluate_fim_task` → `EvaluateFIM(target_crs=…, target_resolution=…)`
+[  ]  A user-set `target_resolution` coexists with the BE33 size guard (the guard may still tighten it further)
+[  ]  TDD
+
+Out of Scope
+- Per-input CRS; reprojection correctness (fimeval handles that)
+
+Notes: Dipsikha, 2026-08-26 demo. Pairs with FE48. Est: ~1 d.
+
+### FIMEVAL-FE48 — Target CRS + resolution controls in the wizard
+
+Description: Add optional **Target CRS** and **Target Resolution** controls to the New
+Evaluation wizard (an Advanced/optional section), defaulting to `EPSG:5070` and
+"auto (coarsest)". Mirrors the desktop app's fields so users aren't locked to CONUS Albers.
+
+[  ]  Advanced section: Target CRS (default `EPSG:5070`) + Target Resolution (blank = auto/coarsest)
+[  ]  Values sent to submit (`target_crs` / `target_resolution`); carried through re-evaluate (FE41)
+[  ]  Client-side validation (CRS format, positive resolution) with clear errors
+[  ]  Chosen values surface in the run's review / Input Files
+
+Out of Scope
+- `n_iterations` / `n_points` / `seed` (FE36 — sibling params panel)
+
+Notes: Dipsikha, 2026-08-26 demo (was proposed FE48 = "user-defined projection + resolution").
+Pairs with BE42. Overlaps FE36 — the two could ship as one combined "Advanced parameters"
+panel. Est: ~1–1.5 d.
