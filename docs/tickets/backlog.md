@@ -69,6 +69,8 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | BE41 | not started | ~5–7 d |
 | BE42 | not started | ~1 d |
 | FE48 | not started | ~1–1.5 d |
+| BE43 | not started | ~5–7 d |
+| BE44 | not started | ~2–3 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -881,3 +883,54 @@ Out of Scope
 Notes: Dipsikha, 2026-08-26 demo (was proposed FE48 = "user-defined projection + resolution").
 Pairs with BE42. Overlaps FE36 — the two could ship as one combined "Advanced parameters"
 panel. Est: ~1–1.5 d.
+
+### FIMEVAL-BE43 — Building-Footprint (BF) evaluation
+
+Description: The desktop app offers a "Building Footprint Analysis" action
+(`gui.py:578-581` → `fimeval.EvaluationWithBuildingFootprint`) that counts building
+centroids landing on TP/FP/FN cells of the contingency raster and computes building-level
+CSI/FAR/POD plus a **Building Deviation Ratio (BDR)**, writing `BuildingCounts_<name>.csv`
++ a bar-chart PNG (`evaluationwithBF.py:377-483`). It auto-downloads Microsoft Building
+Footprints from ArcGIS when no layer is supplied (`arcgis_API.py:16-19`). The web app has
+none of this. Add BF evaluation as an option and surface its results. **FE + BE.**
+
+Backend
+[  ]  Worker path invokes `EvaluationWithBuildingFootprint(main_dir, method, output_dir, shapefile_dir=aoi)` (do **not** modify fimeval)
+[  ]  Optional user-supplied building-footprint layer; otherwise fimeval's ArcGIS auto-download (document the same USA-only/offline caveat as PWB)
+[  ]  BF outputs (BuildingCounts CSV, BDR + building CSI/FAR/POD, chart PNG) uploaded to the job outputs; exposed via an API endpoint
+[  ]  TDD (mock fimeval)
+
+Frontend
+[  ]  A way to request BF analysis (option at submit, or an action on a completed run)
+[  ]  Results view shows building-level metrics (CSI/FAR/POD + BDR) + building counts, and the chart if present
+
+Out of Scope
+- Modifying fimeval; new building metrics beyond what fimeval computes
+
+Notes: Desktop parity (`gui.py:578-581`, `evaluationwithBF.py:377-483`). Largest single
+desktop gap; depends on an AOI/boundary. Est: ~5–7 d.
+
+### FIMEVAL-BE44 — Permanent Water Body (PWB) layer support
+
+Description: fimeval **always** removes permanent water before scoring
+(`evaluationFIM.py:199-216`): if `PWB_dir` is given it uses that local shapefile, otherwise
+it queries a **USA-only ArcGIS REST API** (`water_bodies.py:64-65,201-206`) — a slow,
+external, USA-only dependency the web app **silently relies on today** (we never pass
+`PWB_dir`). Let users supply their own PWB layer and make the ArcGIS fallback explicit and
+graceful. **FE + BE.**
+
+Backend
+[  ]  Worker passes a user-supplied PWB shapefile via `PWB_dir` when provided (like the AOI boundary bundle)
+[  ]  ArcGIS fallback made explicit — opt-in or clearly logged/documented; degrades gracefully offline / for non-USA AOIs instead of silently failing or hanging
+[  ]  TDD (mock fimeval)
+
+Frontend
+[  ]  Optional "Permanent Water Body shapefile" upload in the wizard (reuse the AOI Dropzone; all parts / .zip)
+[  ]  Guidelines/welcome modal notes that without one, a USA-only ArcGIS layer is used
+
+Out of Scope
+- Bundling a global PWB dataset
+
+Notes: Desktop parity (`gui.py:180,186-189`; `evaluationFIM.py:199-216`;
+`water_bodies.py`). Doubles as a hardening fix — removes a hidden always-on external
+dependency. Est: ~2–3 d.
