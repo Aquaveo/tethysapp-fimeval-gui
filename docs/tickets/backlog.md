@@ -50,7 +50,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
-| FE36 | not started (was FE18) | ~2–3 d |
+| FE36 | not started (was FE18) | ~2 d |
 | BE36 | not started | ~1 d |
 | BE37 | not started | ~1.5 d |
 | BE38 | not started | ~0.25 d |
@@ -294,21 +294,30 @@ Out of Scope
 
 Notes: Was mislabeled FE16. Drafted; NOT started. Plotting adds compute/memory — validate against the worker budget before enabling by default (gate behind FE36). Est: ~1.5–2 d.
 
-### FIMEVAL-FE36 — Evaluation parameters panel
+### FIMEVAL-FE36 — Advanced bootstrap parameters panel
 
-Description: The submit UI only picks a method. Framework knobs the library supports are
-hardcoded in the worker (bootstrap `sub_method`/`n_iterations`/`n_points`, `target_resolution`).
-Expose them as optional advanced parameters.
+Description: The UI picks a method and (via FE37) the bootstrap sampling approach, but the
+*remaining* bootstrap knobs fimeval supports are hardcoded in the worker: `n_iterations=100`,
+`n_points=500`, `spacing_range=(100,1000)`, no `seed`, `save_points`/`save_every` fixed. The
+desktop app exposes all of them (`gui.py` Bootstrap tab). Expose them as optional advanced
+parameters. **`seed` matters for correctness** — without it, web bootstrap results vary
+run-to-run and aren't reproducible.
 
-[  ]  Advanced/optional params section in the wizard (collapsed by default): bootstrap `sub_method` / `n_iterations` / `n_points`; optional `target_resolution` for all methods
-[  ]  Submit endpoint validates and threads them through `build_delayed` → `EvaluateFIM`
-[  ]  Defaults preserved when untouched; invalid values rejected with a clear message
-[  ]  Params surface in the run's Input Files details (ties into FE26)
+[  ]  Advanced/optional params section in the wizard (collapsed by default): `n_iterations`, `n_points`, `spacing_range` (min/max — systematic only), `seed`, `save_points`, `save_every`
+[  ]  Submit validates and threads them via `build_delayed` → `EvaluateFIM` (all already accepted by `EvaluateFIM` / `run_bootstrap`)
+[  ]  Defaults preserved when untouched (100 / 500 / (100,1000) / random seed); invalid values rejected with a clear message
+[  ]  Params surface in the run's review / Input Files details (ties into FE26)
 
 Out of Scope
+- `sub_method` — **done** (BE36 backend + FE37 UI picker)
+- Target CRS / target resolution — **moved to FE48 + BE42**
 - Auto-tuning parameters
 
-Notes: Was mislabeled FE18 (which is the tracker's "Pre-staged Benchmark Upload UI"). Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33). ⚠ **Depends on / overlaps BE36 + FE37:** BE36 already threads bootstrap `sub_method` through the backend and FE37 owns the Bootstrap grouping — if those land first (they're ahead in the queue), FE36 narrows to `n_iterations` / `n_points` / `target_resolution`; do **not** re-build the `sub_method` knob here. Est: ~2–3 d (less if BE36/FE37 ship first).
+Notes: Was mislabeled FE18 (tracker's "Pre-staged Benchmark Upload UI"). **Scope revised
+2026-08-26:** `sub_method` dropped (shipped via BE36/FE37), `target_resolution` moved to
+FE48/BE42, and expanded to the full desktop bootstrap knob set — added `spacing_range`,
+`seed`, `save_points`, `save_every`. Could merge with FE48 into one "Advanced parameters"
+panel. Est: ~2 d.
 
 ### FIMEVAL-FE19 — Configurable, switchable basemaps
 
