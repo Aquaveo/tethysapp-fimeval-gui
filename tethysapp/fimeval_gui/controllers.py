@@ -1089,8 +1089,30 @@ def api_job_download_all(request, job_id):
 
 
 # Metrics visualized as bootstrap distributions. These match the column headers
-# fimeval writes in Random_Sampling/random_<candidate>.csv.
+# fimeval writes in <Approach>_Sampling/<approach>_<candidate>.csv.
 BOOTSTRAP_METRICS = ['CSI', 'POD', 'FAR', 'F1', 'MCC', 'Kappa', 'Accuracy']
+
+# fimeval writes each bootstrap sampling approach to its own dir + filename stem
+# (FE50 — the endpoint used to hard-code only Random_Sampling/random_, so
+# stratified/systematic runs returned no box plots).
+_SAMPLING_DIRS = (
+    ('Random_Sampling', 'random_'),
+    ('Systematic_Sampling', 'systematic_'),
+    ('Stratified_Sampling', 'stratified_'),
+)
+
+
+def _bootstrap_candidate_name(key):
+    """If ``key`` is a bootstrap sampling CSV (any approach), return the
+    candidate name (filename minus the ``<approach>_`` prefix and ``.csv``);
+    otherwise None."""
+    if not key.endswith('.csv'):
+        return None
+    fname = key.split('/')[-1]
+    for folder, prefix in _SAMPLING_DIRS:
+        if f'/{folder}/' in key and fname.startswith(prefix):
+            return fname[len(prefix):-len('.csv')]
+    return None
 
 
 def _box_stats(values):
@@ -1140,19 +1162,19 @@ def api_job_bootstrap(request, job_id):
 
     storage = _get_storage()
     try:
-        keys = sorted(
-            k for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
-            if '/Random_Sampling/' in k
-            and k.split('/')[-1].startswith('random_')
-            and k.endswith('.csv')
+        # Match the sampling CSVs of whichever approach this job ran (random /
+        # systematic / stratified), not just random (FE50).
+        matched = sorted(
+            (name, k)
+            for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+            if (name := _bootstrap_candidate_name(k)) is not None
         )
-        if not keys:
+        if not matched:
             return JsonResponse({'error': 'no bootstrap results'}, status=404)
 
         candidates = []
         stats = {}
-        for key in keys:
-            name = key.split('/')[-1][len('random_'):-len('.csv')]
+        for name, key in matched:
             raw = storage.get_object(key)['Body'].read().decode('utf-8', errors='replace')
             series = {m: [] for m in BOOTSTRAP_METRICS}
             for row in csv.DictReader(io.StringIO(raw)):

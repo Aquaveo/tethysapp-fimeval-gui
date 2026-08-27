@@ -1408,6 +1408,36 @@ class TestBootstrapEndpoint(TethysTestCase):
         self.assertEqual(csi['outliers'], [])
         self.assertEqual(csi['n'], 5)
 
+    def test_returns_box_stats_for_stratified(self):
+        # FE50: box plots must work for stratified sampling, not just random.
+        key = 'outputs/1/uid1/case_study/bootstrap/Stratified_Sampling/stratified_candidate_0.csv'
+        job = self._make_job()
+        job.extended_properties['sub_method'] = 'stratified'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage',
+                   return_value=self._storage(keys=[self.OTHER_KEY, key])):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['candidates'], ['candidate_0'])
+        self.assertAlmostEqual(body['stats']['candidate_0']['CSI']['median'], 0.3)
+
+    def test_returns_box_stats_for_systematic(self):
+        # FE50: box plots must work for systematic sampling too.
+        key = 'outputs/1/uid1/case_study/bootstrap/Systematic_Sampling/systematic_candidate_0.csv'
+        job = self._make_job()
+        job.extended_properties['sub_method'] = 'systematic'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage',
+                   return_value=self._storage(keys=[self.OTHER_KEY, key])):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['candidates'], ['candidate_0'])
+        self.assertAlmostEqual(body['stats']['candidate_0']['CSI']['median'], 0.3)
+
     def test_detects_outliers(self):
         csv_text = (
             'CSI,POD,FAR,F1,MCC,Kappa,Accuracy,iteration\n'
