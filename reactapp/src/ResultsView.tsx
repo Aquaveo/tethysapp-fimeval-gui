@@ -3,7 +3,7 @@
 // contingency map (first, FE21), box plots (bootstrap) / metrics table, headline
 // cards, and per-file downloads. Self-loads outputs/metrics/bootstrap/inputs.
 // (Export + Re-run actions are added in FE31.)
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   getJobOutputs,
   getJobMetrics,
@@ -104,6 +104,11 @@ export default function ResultsView({ jobId }: { jobId: number }) {
     const row = metrics.metrics.find((m) => m.metric === name);
     return row ? row.values[firstCand] ?? null : null;
   };
+  // FE51: for bootstrap runs, show the whole-domain metric alongside the median
+  // of the bootstrap distribution (already returned by the bootstrap endpoint).
+  const showBoot = !!(bootstrap && bootstrap.candidates.length > 0);
+  const bootMedian = (metric: string, cand: string): number | null =>
+    bootstrap?.stats?.[cand]?.[metric]?.median ?? null;
   const headline = HEADLINE_METRICS
     .map((name) => ({ name, value: metricValue(name) }))
     .filter((h) => h.value !== null);
@@ -148,27 +153,62 @@ export default function ResultsView({ jobId }: { jobId: number }) {
 
       {metrics && metrics.metrics.length > 0 && (
         <div className="results-panel">
-          <div className="results-panel-title">All metrics</div>
+          <div className="results-panel-title">
+            {showBoot ? 'Metrics — whole domain vs. bootstrap' : 'All metrics'}
+          </div>
           <table className="results-table">
             <thead>
-              <tr>
-                <th>Metric</th>
-                {candidates.map((c) => (
-                  <th key={c} className="num">{c}</th>
-                ))}
-              </tr>
+              {showBoot ? (
+                <>
+                  <tr>
+                    <th rowSpan={2}>Metric</th>
+                    {candidates.map((c) => (
+                      <th key={c} className="num" colSpan={2}>{c}</th>
+                    ))}
+                  </tr>
+                  <tr>
+                    {candidates.map((c) => (
+                      <Fragment key={c}>
+                        <th className="num">Whole domain</th>
+                        <th className="num">Bootstrap median</th>
+                      </Fragment>
+                    ))}
+                  </tr>
+                </>
+              ) : (
+                <tr>
+                  <th>Metric</th>
+                  {candidates.map((c) => (
+                    <th key={c} className="num">{c}</th>
+                  ))}
+                </tr>
+              )}
             </thead>
             <tbody>
               {metrics.metrics.map((row) => (
                 <tr key={row.metric}>
                   <td>{row.metric}</td>
-                  {candidates.map((c) => (
-                    <td key={c} className="num">{formatValue(row.values[c] ?? null)}</td>
-                  ))}
+                  {candidates.map((c) =>
+                    showBoot ? (
+                      <Fragment key={c}>
+                        <td className="num">{formatValue(row.values[c] ?? null)}</td>
+                        <td className="num">{formatValue(bootMedian(row.metric, c))}</td>
+                      </Fragment>
+                    ) : (
+                      <td key={c} className="num">{formatValue(row.values[c] ?? null)}</td>
+                    ),
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
+          {showBoot && (
+            <p className="results-table-note">
+              <strong>Whole domain</strong> = the metric computed over all evaluated pixels.{' '}
+              <strong>Bootstrap median</strong> = the median across the resampling iterations
+              (full distribution shown in the box-plots above).
+            </p>
+          )}
         </div>
       )}
 

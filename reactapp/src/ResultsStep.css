@@ -181,3 +181,11 @@
   gap: 0.6rem;
   align-items: center;
 }
+
+/* FE51: whole-domain vs bootstrap-median table note */
+.results-table-note {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
