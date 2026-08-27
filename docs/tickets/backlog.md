@@ -71,6 +71,10 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE48 | not started | ~1–1.5 d |
 | BE43 | not started | ~5–7 d |
 | BE44 | not started | ~2–3 d |
+| FE47 | not started | ~0.25–0.5 d |
+| FE49 | not started | ~2–3 d |
+| FE50 | implemented (awaiting test) | ~0.5 d |
+| FE51 | not started | ~1.5–2 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -934,3 +938,77 @@ Out of Scope
 Notes: Desktop parity (`gui.py:180,186-189`; `evaluationFIM.py:199-216`;
 `water_bodies.py`). Doubles as a hardening fix — removes a hidden always-on external
 dependency. Est: ~2–3 d.
+
+---
+
+## Demo batch (2026-08-26 demo) — numbers confirmed from the tracker 2026-08-27
+
+Tracker titles use the prefix "BYU CIROH: FIMeval GUI – …". FE48/BE42 (target CRS +
+resolution) belong to this batch too — their bodies are in the desktop-parity section above.
+
+### FIMEVAL-FE47 — Documentation link inside the welcome modal
+
+Description: Team decision: the welcome popup adopts FIMbench's format with a direct link
+to project documentation. The FE40 modal currently has no doc link inside it (only the nav
+does). Add a docs callout/link in the welcome modal, matching FIMbench's style.
+
+[  ]  Welcome modal includes a clear Documentation link/callout that opens the docs page/route
+[  ]  Styled like FIMbench's modal docs callout
+[  ]  Keyboard-accessible
+
+Out of Scope
+- The docs content itself (FE49)
+
+Notes: 2026-08-26 demo decision. Builds on FE40. Est: ~0.25–0.5 d.
+
+### FIMEVAL-FE49 — Populate the in-app Documentation page
+
+Description: The app's `/docs` page is currently a placeholder. Populate it with real
+FIMeval documentation pulled from the FIMeval OG GitHub repo (+ the existing HTML site).
+Called out as an MVP requirement.
+
+[  ]  `/docs` renders the FIMeval documentation sourced from its OG GitHub repo (+ existing HTML site)
+[  ]  Navigable/readable in-app; images and links work
+[  ]  Reachable from the nav and the welcome-modal link (FE47)
+
+Out of Scope
+- FIMsim documentation (deliberately kept out of FIMeval tickets for now)
+- Live auto-sync from GitHub (one-time import for MVP unless specified)
+
+Notes: 2026-08-26 demo, MVP. Supported by Parvaneh + Dipsikha. The meeting notes'
+"FMAL" = FIMsim (transcription artifact); FIMsim docs were subsequently descoped. Est: ~2–3 d.
+
+### FIMEVAL-FE50 — Restore box plots for stratified & systematic sampling
+
+Description: Bug (backend, despite the FE number). The bootstrap box-plot endpoint
+(`api_job_bootstrap`) hard-coded the `Random_Sampling/` dir + `random_` filename prefix.
+Once stratified/systematic became selectable (BE36/FE37), those runs returned 404 → no box
+plots (only random rendered). fimeval writes each approach to its own dir/stem
+(`Random_Sampling/random_`, `Systematic_Sampling/systematic_`, `Stratified_Sampling/stratified_`).
+
+[x]  `api_job_bootstrap` matches any `*_Sampling/<approach>_*.csv` (random/systematic/stratified)
+[x]  Candidate name extracted regardless of approach; box-stats math unchanged
+[x]  Random still works; older jobs resolve
+[x]  TDD (stratified + systematic tests)
+
+Out of Scope
+- Frontend — `BootstrapBoxPlots` is generic, no change needed
+
+Notes: From the 2026-08-26 demo. Implemented 2026-08-27; awaiting manual test → commit. Est: ~0.5 d.
+
+### FIMEVAL-FE51 — Results table: whole-domain metrics + bootstrap median (labeled)
+
+Description: For bootstrap runs, the results should show both the whole-domain (all-pixels)
+metrics and the median of the bootstrap distribution, clearly labeled so users don't confuse
+them. fimeval already computes the whole-domain metrics — they live in an `evaluation/` CSV
+inside the bootstrap output folder. FE + small BE.
+
+[  ]  (BE) Expose the whole-domain metrics CSV (from the bootstrap run's `evaluation/` folder) via the metrics endpoint/response
+[  ]  (FE) Results table adds a "Bootstrap median" column (per metric, per candidate) alongside the whole-domain values
+[  ]  (FE) Clear labeling distinguishes "whole domain" vs "bootstrap (median)"
+[  ]  Non-bootstrap runs unaffected (whole-domain only)
+
+Out of Scope
+- Changing which metrics fimeval computes
+
+Notes: 2026-08-26 demo (Sagy/Dipsikha). Pairs with FE50. Est: ~1.5–2 d.
