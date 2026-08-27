@@ -4,6 +4,7 @@ import json as json_module
 import logging
 import math
 import os
+import re
 import statistics
 import tempfile
 import uuid
@@ -247,6 +248,15 @@ def _validate_filename(name, allowed_exts):
     if ext not in allowed_exts:
         return f"'{name}': unsupported file type (allowed: {', '.join(sorted(allowed_exts))})"
     return None
+
+
+def _has_bm_token(filename: str) -> bool:
+    """True if *filename* has a distinct ``bm`` token (splitting on ``_-.`` and
+    whitespace), mirroring how fimeval recognizes a benchmark (BE37).
+    ``Region_BM.tif`` -> True; ``BLEBM_24947028.tif`` -> False (``bm`` isn't a
+    separate token)."""
+    stem = os.path.splitext(os.path.basename(filename or ''))[0].lower()
+    return 'bm' in re.split(r'[_\-.\s]+', stem)
 
 
 @controller(url='api/upload', login_required=True, name='api_upload')
@@ -542,6 +552,52 @@ def api_jobs_submit(request):
         _basename(k) for k, size in sizes.items()
         if _basename(k).startswith('candidate_') and k.endswith('.tif') and size > 0
     )
+
+    # BE37: benchmark input validation. Read the presign manifest (original
+    # filenames). The "BM" naming checks are best-effort — skipped for legacy
+    # uploads with no manifest — but the byte-identical check always runs.
+    try:
+        names = json_module.loads(
+            storage.get_object(f'{prefix}manifest.json')['Body'].read()
+        ).get('names', {})
+    except (ClientError, BotoCoreError, ValueError):
+        names = {}
+
+    if names:
+        bench_name = names.get('benchmark.tif', '')
+        if not _has_bm_token(bench_name):
+            return JsonResponse({'error': (
+                'The benchmark file name must include a distinct "BM" marker '
+                f"(e.g. Region_BM.tif) so it's clearly the benchmark — '{bench_name}' "
+                'does not. Rename it and re-upload.'
+            )}, status=400)
+        for cname in candidate_names:
+            orig = names.get(cname, '')
+            if _has_bm_token(orig):
+                return JsonResponse({'error': (
+                    f'"{orig}" looks like a benchmark (its name contains "BM"). '
+                    'Did you mean to add it as the Benchmark raster? Add it as the '
+                    'Benchmark, or rename the candidate.'
+                )}, status=400)
+
+    # Reject a candidate byte-identical to the benchmark (same raster in both
+    # slots → the BE29 OOM/timeout case). ETag = content MD5 for our single-PUT
+    # uploads, so identical files share it.
+    bench_key = f'{prefix}benchmark.tif'
+    try:
+        bench_etag = storage.etag(bench_key)
+        bench_size = sizes.get(bench_key, 0)
+        if bench_etag is not None:
+            for cname in candidate_names:
+                ckey = f'{prefix}{cname}'
+                if sizes.get(ckey, 0) == bench_size and storage.etag(ckey) == bench_etag:
+                    return JsonResponse({'error': (
+                        'A candidate is identical to the benchmark — choose a '
+                        'different candidate.'
+                    )}, status=400)
+    except (ClientError, BotoCoreError):
+        pass  # storage hiccup on the integrity check — don't block the run
+
     downsample = bool(body.get('downsample'))
     target_resolution = None
     est = _estimate_working_pixels(_get_storage(), prefix, candidate_names)

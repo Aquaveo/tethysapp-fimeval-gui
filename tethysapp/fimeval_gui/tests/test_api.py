@@ -317,6 +317,16 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
+    def _put_manifest(self, upload_id, names):
+        """Stage the presign manifest that maps renamed keys -> original names
+        (BE30), which BE37's naming checks read."""
+        user_id = str(self.user.id)
+        boto3.client('s3', region_name='us-east-1').put_object(
+            Bucket=BUCKET,
+            Key=f'uploads/{user_id}/{upload_id}/manifest.json',
+            Body=json.dumps({'names': names}).encode('utf-8'),
+        )
+
     def _submit(self, upload_id, method='intersected_extent', downsample=False,
                 sub_method=None):
         payload = {'upload_id': upload_id, 'method': method}
@@ -433,6 +443,51 @@ class TestSubmitEndpoint(TethysTestCase):
         ):
             response = self._submit('u_badsm', method='bootstrap', sub_method='bogus')
         self.assertEqual(response.status_code, 400)
+
+    # ── BE37: benchmark input validation ──
+    def test_submit_rejects_benchmark_without_bm_token(self):
+        self._put_upload('u_nobm')
+        self._put_manifest('u_nobm', {'benchmark.tif': 'region.tif', 'candidate_0.tif': 'cand.tif'})
+        response = self._submit('u_nobm')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('BM', json.loads(response.content)['error'])
+
+    def test_submit_accepts_benchmark_with_bm_token(self):
+        self._put_upload('u_bm')
+        self._put_manifest('u_bm', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'cand.tif'})
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_bm')
+        self.assertEqual(response.status_code, 202)
+
+    def test_submit_rejects_candidate_with_bm_token(self):
+        self._put_upload('u_cbm')
+        self._put_manifest('u_cbm', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'other_BM.tif'})
+        response = self._submit('u_cbm')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Benchmark', json.loads(response.content)['error'])
+
+    def test_submit_rejects_candidate_identical_to_benchmark(self):
+        # Same raster in both slots (the BE29 OOM/timeout case) → reject.
+        self._put_benchmark('u_iden', body=b'IDENTICAL-RASTER-BYTES')
+        self._put_candidate('u_iden', body=b'IDENTICAL-RASTER-BYTES')
+        self._put_manifest('u_iden', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'cand.tif'})
+        response = self._submit('u_iden')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('identical', json.loads(response.content)['error'].lower())
+
+    def test_submit_without_manifest_skips_bm_check(self):
+        # Legacy/non-presign uploads have no manifest → BM checks are skipped
+        # (byte-identical still applies); a normal job still submits.
+        self._put_upload('u_nomani')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_nomani')
+        self.assertEqual(response.status_code, 202)
 
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')

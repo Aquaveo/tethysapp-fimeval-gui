@@ -89,6 +89,7 @@
 .ne-md { display: block; font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.15rem; }
 .ne-aoi { margin-top: 1rem; }
 .ne-hint { margin: 0.5rem 0 0; font-size: 0.82rem; color: var(--color-text-muted); }
+.ne-hint-err { color: #cc0000; }
 
 /* Review */
 .ne-review-row { display: flex; gap: 1rem; padding: 0.5rem 0; font-size: 0.9rem; border-top: 1px solid var(--color-border); }

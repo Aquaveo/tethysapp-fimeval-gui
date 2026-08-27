@@ -50,6 +50,13 @@ function methodSummary(method: Method, subMethod: SubMethod): string {
   return FULL_DOMAIN.find((m) => m.value === method)?.label ?? method;
 }
 
+// Mirror of the backend BE37 check: a distinct "bm" token in the filename
+// ("Region_BM.tif" -> true; "BLEBM_1.tif" -> false).
+function hasBmToken(filename: string): boolean {
+  const stem = filename.replace(/\.[^.]*$/, '').toLowerCase();
+  return stem.split(/[_\-.\s]+/).includes('bm');
+}
+
 function mergeUnique(prev: File[], incoming: File[]): File[] {
   const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
   return [...prev, ...incoming.filter((f) => !seen.has(`${f.name}:${f.size}`))];
@@ -80,7 +87,21 @@ export default function NewEvaluation() {
   const isAOI = method === 'AOI';
   const isBootstrap = method === 'bootstrap';
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
-  const step1Valid = benchmark !== null && candidates.length > 0;
+
+  // BE37 benchmark-input validation (block before upload).
+  const benchmarkBmError = benchmark && !hasBmToken(benchmark.name)
+    ? `The benchmark filename should include a distinct "BM" marker (e.g. Region_BM.tif) — "${benchmark.name}" doesn't.`
+    : null;
+  const bmCandidates = candidates.filter((c) => hasBmToken(c.name));
+  const candidateBmError = bmCandidates.length > 0
+    ? `${bmCandidates.map((c) => `"${c.name}"`).join(', ')} look${bmCandidates.length === 1 ? 's' : ''} like a benchmark ("BM" in the name). Did you mean to add ${bmCandidates.length === 1 ? 'it' : 'one'} as the Benchmark? Remove it, or move it to the Benchmark slot.`
+    : null;
+  const dupNameError = benchmark && candidates.some((c) => c.name === benchmark.name)
+    ? 'A candidate has the same name as the benchmark — pick a different candidate.'
+    : null;
+
+  const step1Valid = benchmark !== null && candidates.length > 0
+    && !benchmarkBmError && !candidateBmError && !dupNameError;
   // In reuse mode we can't add a boundary (no upload step), so AOI is only valid
   // if the reused run already has one.
   const step2Valid = reuseMode ? (!isAOI || reuseHasBoundary) : (!isAOI || hasShp);
@@ -229,6 +250,7 @@ export default function NewEvaluation() {
                   onClick={() => setBenchmark(null)}>✕</button>
               </div>
             )}
+            {benchmarkBmError && <p className="ne-hint ne-hint-err">{benchmarkBmError}</p>}
 
             <span className="ne-label">Candidate raster(s)</span>
             <Dropzone label="Drop one or more .tif here" multiple accept={['.tif', '.tiff']}
@@ -244,6 +266,8 @@ export default function NewEvaluation() {
                 ))}
               </div>
             )}
+            {candidateBmError && <p className="ne-hint ne-hint-err">{candidateBmError}</p>}
+            {dupNameError && <p className="ne-hint ne-hint-err">{dupNameError}</p>}
           </div>
         )}
 
