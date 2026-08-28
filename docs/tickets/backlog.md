@@ -72,9 +72,14 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | BE43 | not started | ~5–7 d |
 | BE44 | not started | ~2–3 d |
 | FE47 | not started | ~0.25–0.5 d |
-| FE49 | not started | ~2–3 d |
-| FE50 | implemented (awaiting test) | ~0.5 d |
-| FE51 | not started | ~1.5–2 d |
+| FE49 | ✅ done | ~2–3 d |
+| FE50 | ✅ done | ~0.5 d |
+| FE51 | ✅ done | ~1.5–2 d |
+| FE52 | not started | ~0.5 d |
+| BE45 | not started | ~1–2 d |
+| FE53 | not started | ~0.5 d |
+| FE54 | not started | ~0.5–1 d |
+| FE55 | not started | ~1 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -886,7 +891,8 @@ Out of Scope
 
 Notes: Dipsikha, 2026-08-26 demo (was proposed FE48 = "user-defined projection + resolution").
 Pairs with BE42. Overlaps FE36 — the two could ship as one combined "Advanced parameters"
-panel. Est: ~1–1.5 d.
+panel. ⚠ 2026-08-27 demo (Dipsikha): users **type in** their CRS + target resolution as
+**free-text inputs**, NOT a dropdown. Est: ~1–1.5 d.
 
 ### FIMEVAL-BE43 — Building-Footprint (BF) evaluation
 
@@ -1012,3 +1018,87 @@ Out of Scope
 - Changing which metrics fimeval computes
 
 Notes: 2026-08-26 demo (Sagy/Dipsikha). Pairs with FE50. Est: ~1.5–2 d.
+
+---
+
+## Alpha release & demo bugs (2026-08-27 demo)
+
+### FIMEVAL-FE52 — "Alpha / lightweight version" notice + link to the full package
+
+Description: The team approved deploying a minimal/lightweight FIMeval to the CIROH portal
+for alpha testing; Sagy required that users be **clearly told it's the lightweight version**
+and directed to the full package. Add a clear, unmissable notice.
+
+[  ]  A visible "Alpha — lightweight version" indicator (header badge and/or a line in the welcome modal)
+[  ]  States it's a lightweight build + links to the full package (desktop / OG repo)
+[  ]  Unmissable on first use (ties into the FE40 welcome modal), non-intrusive after
+
+Out of Scope
+- Feature-gating lightweight vs. full behavior
+
+Notes: 2026-08-27 demo (Sagy). Alpha-release requirement. Est: ~0.5 d.
+
+### FIMEVAL-BE45 — Deploy the alpha (lightweight) build to the CIROH portal
+
+Description: Package and deploy the current FIMeval web app as the alpha/lightweight release
+on the CIROH core portal for testing by Dipsikha + Parvaneh. Deploying on the core portal
+auto-routes users through login (keeps the login-required workflow).
+
+[  ]  Build + deploy the app to the CIROH portal (alpha)
+[  ]  Login-required confirmed via the portal
+[  ]  Dask scheduler/worker + MinIO/S3 config verified in the portal environment
+[  ]  Testers (Dipsikha, Parvaneh) can reach it; feedback loop set up
+
+Out of Scope
+- HydroShare integration (future); anonymous-user access (postponed)
+
+Notes: 2026-08-27 demo decision. Deployment/ops — coordinate with Giovanni (portal). Est: ~1–2 d.
+
+### FIMEVAL-FE53 — 🐛 Bootstrap median not populating in the metrics table
+
+Description: Demo bug: the metrics table showed blank median values even though the medians
+appeared in the box-plots. FE51 added a "Bootstrap median" column — verify it actually
+populates. Likely cause: a metric-name mismatch between the whole-domain
+`EvaluationMetrics.csv` rows and the bootstrap stats keys (`BOOTSTRAP_METRICS`), which would
+render "—".
+
+[  ]  Reproduce on a bootstrap run; confirm whether FE51's median column populates
+[  ]  Align metric-name matching (case/labels) so medians populate for every shared metric
+[  ]  Add/adjust a test if the fix is code-side
+
+Out of Scope
+- Changing which metrics are computed
+
+Notes: 2026-08-27 demo (Reshma/Dinuke). Follow-up to FE51. Est: ~0.5 d.
+
+### FIMEVAL-FE54 — 🐛 Intersected Extent produces box plots instead of re-evaluating
+
+Description: Demo bug: selecting **Intersected Extent** (a Full Domain method) incorrectly
+generated box-plots instead of running/re-evaluating as a full-domain analysis. Box-plots
+must appear **only** for Bootstrap runs. Likely the results view renders box-plots whenever
+bootstrap data is present (e.g. stale from a prior run) and/or the re-evaluate flow didn't
+switch the method.
+
+[  ]  Reproduce (run / re-evaluate with Intersected Extent)
+[  ]  Box-plots render ONLY for bootstrap runs; Intersected Extent shows the metrics table + contingency map, no box-plots
+[  ]  If it's a re-evaluate bug: the newly chosen method is honored (no carryover of the prior run's bootstrap results)
+
+Out of Scope
+- (none)
+
+Notes: 2026-08-27 demo (Reshma/Dinuke). Est: ~0.5–1 d.
+
+### FIMEVAL-FE55 — Auto-refresh the in-app docs from the GitHub repo (FE49 follow-up)
+
+Description: FE49 bundled the FIMeval docs as a one-time import. The team expects the docs
+(bootstrap methods, intersected extents) to stay current with the GitHub repo. Add a
+mechanism to refresh the bundled docs from the OG repo so they don't drift.
+
+[  ]  Docs re-pull from `sdmlua/fimeval` at build time (or a scheduled sync), replacing the manual copy
+[  ]  Images handled; the page still renders offline from the last sync
+
+Out of Scope
+- Rendering arbitrary repo files
+
+Notes: 2026-08-27 demo ("docs auto-pulled from GitHub"). Follow-up to FE49 (a one-time
+import). Lower priority. Est: ~1 d.
