@@ -21,6 +21,12 @@ classifiers = [
      "Topic :: Internet :: WWW/HTTP",
      "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
+dependencies = [
+    "fimeval>=0.1.64",
+    "boto3",
+    "dask[distributed]",
+    "rio-tiler>=6",
+]
 dynamic = ["version"]
 
 [tool.setuptools]

@@ -297,3 +297,21 @@ export function downloadUrl(jobId: number, key: string): string {
 export function downloadAllUrl(jobId: number): string {
   return `${API_BASE}/jobs/${jobId}/download-all/`;
 }
+
+export interface TileJson {
+  tilejson: string;
+  tiles: string[];
+  bounds: [number, number, number, number];
+  minzoom: number;
+  maxzoom: number;
+}
+
+// Resolves only when the job has a contingency-map COG; 404 otherwise (caller
+// treats that as "no contingency map to show").
+export async function fetchTileJson(jobId: number): Promise<TileJson> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/tiles.json/`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) throw new Error(`no tilejson (HTTP ${response.status})`);
+  return response.json();
+}
