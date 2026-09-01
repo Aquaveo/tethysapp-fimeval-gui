@@ -13,7 +13,9 @@ export default function Header() {
           alt="FIMeval logo"
         />
         <span>
-          <h1 className="wk-title">FIMeval</h1>
+          <h1 className="wk-title">
+            FIMeval <span className="wk-alpha-badge" title="Lightweight alpha version">Alpha</span>
+          </h1>
           <p className="wk-tagline">Evaluate candidate flood maps against benchmarks</p>
         </span>
       </Link>
