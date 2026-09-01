@@ -7,6 +7,53 @@
   border-radius: 8px;
   overflow: hidden;
 }
+.contingency-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+}
+.contingency-basemaps {
+  display: inline-flex;
+  border: 1px solid var(--color-surface-alt);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.contingency-basemap-btn {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.7rem;
+}
+.contingency-basemap-btn:first-child {
+  border-left: none;
+}
+.contingency-basemap-btn:hover {
+  color: var(--color-text);
+}
+.contingency-basemap-btn.is-active {
+  background: var(--color-primary, #2c7fb8);
+  color: #fff;
+}
+.contingency-control {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-text-muted);
+}
+.contingency-control input[type='range'] {
+  width: 140px;
+}
+.contingency-control-value {
+  min-width: 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .contingency-legend {
   list-style: none;
   display: flex;

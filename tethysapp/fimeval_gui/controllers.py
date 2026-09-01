@@ -65,6 +65,57 @@ def api_csrf(request):
     return JsonResponse({'detail': 'CSRF cookie set'})
 
 
+# Basemap layers the contingency-map viewer can show (FE19). Keyed by the short
+# name an operator lists in the `basemap_layers` custom setting; each maps to a
+# keyless ESRI raster tile source. Order here is the default order (Satellite
+# first) when the setting is blank.
+BASEMAP_PRESETS = {
+    'satellite': {
+        'label': 'Satellite',
+        'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        'attribution': 'Esri, Maxar, Earthstar Geographics',
+    },
+    'street': {
+        'label': 'Street',
+        'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        'attribution': 'Esri',
+    },
+    'topographic': {
+        'label': 'Topographic',
+        'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        'attribution': 'Esri',
+    },
+}
+
+
+def _resolve_basemaps():
+    """Resolve the `basemap_layers` custom setting into the layer list the SPA
+    renders. The setting is a comma-separated list of preset keys; blank (or
+    all-unknown) falls back to every preset. Unknown keys are dropped, order is
+    preserved, and duplicates are collapsed. Satellite is the default selection
+    when present, else the first configured layer."""
+    raw = App.get_custom_setting('basemap_layers')
+    keys = [k.strip().lower() for k in raw.split(',')] if raw else []
+    ordered = []
+    for k in keys:
+        if k in BASEMAP_PRESETS and k not in ordered:
+            ordered.append(k)
+    if not ordered:
+        ordered = list(BASEMAP_PRESETS)
+    layers = [{'key': k, **BASEMAP_PRESETS[k]} for k in ordered]
+    default = 'satellite' if 'satellite' in ordered else ordered[0]
+    return {'layers': layers, 'default': default}
+
+
+@controller(url='api/basemaps', login_required=True, name='api_basemaps')
+def api_basemaps(request):
+    """GET: the basemap layers the contingency-map viewer may show, resolved from
+    the `basemap_layers` custom setting, plus the default selection."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    return JsonResponse(_resolve_basemaps())
+
+
 # Components of an ESRI shapefile bundle (only used by the AOI method).
 ALLOWED_BOUNDARY_EXT = {'.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'}
 
