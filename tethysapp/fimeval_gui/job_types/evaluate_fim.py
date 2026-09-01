@@ -189,7 +189,7 @@ def _read_vector_crs(shp_path):
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict,
-                          target_resolution=None, sub_method='stratified'):
+                          target_resolution=None, sub_method='stratified', run_id=None):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
     Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
@@ -220,7 +220,13 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
     )
     bucket = s3_config['bucket']
     input_prefix = f'uploads/{user_id}/{upload_id}/'
-    output_prefix = f'outputs/{user_id}/{upload_id}/'
+    # Each run gets its own output namespace (run_id) so re-evaluating the same
+    # upload with a different method/sampling doesn't collide with (or read back)
+    # a prior run's results. Legacy runs (no run_id) keep the flat prefix.
+    output_prefix = (
+        f'outputs/{user_id}/{upload_id}/{run_id}/' if run_id
+        else f'outputs/{user_id}/{upload_id}/'
+    )
 
     # Signal that a worker has actually picked this job up (vs. queued at the
     # scheduler): the status endpoint reads this to report 'running' instead of
@@ -397,4 +403,5 @@ class EvaluateFIMJobType(JobType):
             params['s3_config'],
             target_resolution=params.get('target_resolution'),
             sub_method=params.get('sub_method') or 'stratified',
+            run_id=params.get('run_id'),
         )

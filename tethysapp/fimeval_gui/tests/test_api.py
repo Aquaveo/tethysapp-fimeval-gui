@@ -424,6 +424,18 @@ class TestSubmitEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(self.mock_job.extended_properties['sub_method'], 'stratified')
 
+    def test_submit_sets_run_id(self):
+        # Each submission gets a unique run_id so its outputs are isolated from a
+        # re-evaluation of the same upload.
+        self._put_upload('u_run')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_run')
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(self.mock_job.extended_properties.get('run_id'))
+
     def test_submit_accepts_each_valid_sub_method(self):
         for sm in ('random', 'systematic', 'stratified'):
             self._put_upload(f'u_{sm}')
@@ -1437,6 +1449,29 @@ class TestBootstrapEndpoint(TethysTestCase):
         body = json.loads(response.content)
         self.assertEqual(body['candidates'], ['candidate_0'])
         self.assertAlmostEqual(body['stats']['candidate_0']['CSI']['median'], 0.3)
+
+    def test_reads_only_this_runs_outputs(self):
+        # Re-evaluate isolation: a job with a run_id must read its own run's
+        # sampling CSV (outputs/.../<run_id>/...), not a stale one left in the
+        # flat / previous-run prefix.
+        job = self._make_job()
+        job.extended_properties['run_id'] = 'runB'
+        keys = [
+            'outputs/1/uid1/case_study/bootstrap/Systematic_Sampling/systematic_candidate_0.csv',  # stale, flat prefix
+            'outputs/1/uid1/runB/case_study/bootstrap/Random_Sampling/random_candidate_0.csv',      # this run
+        ]
+        storage = MagicMock()
+        storage.list_prefix.side_effect = lambda p: [k for k in keys if k.startswith(p)]
+        storage.get_object.side_effect = lambda key: {
+            'Body': io.BytesIO(self.CSV.encode('utf-8'))
+        }
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=storage):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        storage.list_prefix.assert_called_with('outputs/1/uid1/runB/')
+        self.assertEqual(json.loads(response.content)['candidates'], ['candidate_0'])
 
     def test_detects_outliers(self):
         csv_text = (
