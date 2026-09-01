@@ -78,7 +78,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE52 | not started | ~0.5 d |
 | BE45 | not started | ~1–2 d |
 | FE53 | not started | ~0.5 d |
-| FE54 | not started | ~0.5–1 d |
+| FE54 | ✅ done (via PR #15) | ~0.5–1 d |
 | FE55 | not started | ~1 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
@@ -1086,7 +1086,11 @@ switch the method.
 Out of Scope
 - (none)
 
-Notes: 2026-08-27 demo (Reshma/Dinuke). Est: ~0.5–1 d.
+Notes: 2026-08-27 demo (Reshma/Dinuke). ✅ **RESOLVED (2026-09-01, PR #15)** — root cause was
+the shared per-upload output prefix: re-evaluating read back the previous bootstrap run's box
+plots. The re-evaluate output-isolation fix (per-run `run_id` namespace) means Intersected
+Extent now reads its own run and shows no box plots. Confirmed by user (systematic → Convex
+Hull → Intersected Extent all correct). Est: ~0.5–1 d.
 
 ### FIMEVAL-FE55 — Auto-refresh the in-app docs from the GitHub repo (FE49 follow-up)
 
