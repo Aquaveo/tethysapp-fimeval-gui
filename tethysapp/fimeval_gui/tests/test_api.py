@@ -653,6 +653,57 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertIsNotNone(body['reason'])
         self.assertIn('did not complete', body['reason'].lower())
 
+    def _pending_no_marker_job(self, age):
+        import datetime
+        from django.utils import timezone
+        job = self._make_job(
+            self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
+        )
+        job.creation_time = timezone.now() - age
+        mock_future = MagicMock()
+        mock_future.status = 'pending'  # -> queued
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = []  # no worker markers = never started
+        empty = MagicMock()
+        empty.read.return_value = b''
+        mock_storage.get_object.return_value = {'Body': empty}
+        return job, mock_future, mock_storage
+
+    def test_status_times_out_a_never_started_job(self):
+        # No worker ever picked the job up (queued, no _RUNNING marker). Past the
+        # short "never-started" timeout (BE35) it must fail fast — long before the
+        # 30-min running timeout — with a worker-oriented reason.
+        import datetime
+        job, mock_future, mock_storage = self._pending_no_marker_job(
+            datetime.timedelta(minutes=5)
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('worker', (body['reason'] or '').lower())
+
+    def test_status_keeps_a_recently_queued_job(self):
+        # A job queued only a moment ago (worker may just be busy) must NOT be
+        # failed by the never-started timeout.
+        import datetime
+        job, mock_future, mock_storage = self._pending_no_marker_job(
+            datetime.timedelta(seconds=20)
+        )
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(json.loads(response.content)['status'], 'queued')
+
     def test_status_returns_inputs_metadata(self):
         job = self._make_job(
             self.user, extended_properties={'upload_id': 'uid1', 'user_id': '1'}
