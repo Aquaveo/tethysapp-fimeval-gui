@@ -50,7 +50,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
-| FE36 | not started (was FE18) | ~2–3 d |
+| FE36 | not started (was FE18) | ~2 d |
 | BE36 | not started | ~1 d |
 | BE37 | not started | ~1.5 d |
 | BE38 | not started | ~0.25 d |
@@ -65,6 +65,21 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE44 | not started | ~1 d |
 | FE45 | not started | ~1–1.5 d |
 | FE46 | not started | ~2–3 d |
+| BE40 | not started | ~1 d |
+| BE41 | not started | ~5–7 d |
+| BE42 | not started | ~1 d |
+| FE48 | not started | ~1–1.5 d |
+| BE43 | not started | ~5–7 d |
+| BE44 | not started | ~2–3 d |
+| FE47 | not started | ~0.25–0.5 d |
+| FE49 | ✅ done | ~2–3 d |
+| FE50 | ✅ done | ~0.5 d |
+| FE51 | ✅ done | ~1.5–2 d |
+| FE52 | not started | ~0.5 d |
+| BE45 | not started | ~1–2 d |
+| FE53 | not started | ~0.5 d |
+| FE54 | not started | ~0.5–1 d |
+| FE55 | not started | ~1 d |
 
 **Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
 BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
@@ -290,21 +305,30 @@ Out of Scope
 
 Notes: Was mislabeled FE16. Drafted; NOT started. Plotting adds compute/memory — validate against the worker budget before enabling by default (gate behind FE36). Est: ~1.5–2 d.
 
-### FIMEVAL-FE36 — Evaluation parameters panel
+### FIMEVAL-FE36 — Advanced bootstrap parameters panel
 
-Description: The submit UI only picks a method. Framework knobs the library supports are
-hardcoded in the worker (bootstrap `sub_method`/`n_iterations`/`n_points`, `target_resolution`).
-Expose them as optional advanced parameters.
+Description: The UI picks a method and (via FE37) the bootstrap sampling approach, but the
+*remaining* bootstrap knobs fimeval supports are hardcoded in the worker: `n_iterations=100`,
+`n_points=500`, `spacing_range=(100,1000)`, no `seed`, `save_points`/`save_every` fixed. The
+desktop app exposes all of them (`gui.py` Bootstrap tab). Expose them as optional advanced
+parameters. **`seed` matters for correctness** — without it, web bootstrap results vary
+run-to-run and aren't reproducible.
 
-[  ]  Advanced/optional params section in the wizard (collapsed by default): bootstrap `sub_method` / `n_iterations` / `n_points`; optional `target_resolution` for all methods
-[  ]  Submit endpoint validates and threads them through `build_delayed` → `EvaluateFIM`
-[  ]  Defaults preserved when untouched; invalid values rejected with a clear message
-[  ]  Params surface in the run's Input Files details (ties into FE26)
+[  ]  Advanced/optional params section in the wizard (collapsed by default): `n_iterations`, `n_points`, `spacing_range` (min/max — systematic only), `seed`, `save_points`, `save_every`
+[  ]  Submit validates and threads them via `build_delayed` → `EvaluateFIM` (all already accepted by `EvaluateFIM` / `run_bootstrap`)
+[  ]  Defaults preserved when untouched (100 / 500 / (100,1000) / random seed); invalid values rejected with a clear message
+[  ]  Params surface in the run's review / Input Files details (ties into FE26)
 
 Out of Scope
+- `sub_method` — **done** (BE36 backend + FE37 UI picker)
+- Target CRS / target resolution — **moved to FE48 + BE42**
 - Auto-tuning parameters
 
-Notes: Was mislabeled FE18 (which is the tracker's "Pre-staged Benchmark Upload UI"). Drafted; NOT started. A `target_resolution` control also gives a manual lever against the high-resolution OOM case (complements BE33). ⚠ **Depends on / overlaps BE36 + FE37:** BE36 already threads bootstrap `sub_method` through the backend and FE37 owns the Bootstrap grouping — if those land first (they're ahead in the queue), FE36 narrows to `n_iterations` / `n_points` / `target_resolution`; do **not** re-build the `sub_method` knob here. Est: ~2–3 d (less if BE36/FE37 ship first).
+Notes: Was mislabeled FE18 (tracker's "Pre-staged Benchmark Upload UI"). **Scope revised
+2026-08-26:** `sub_method` dropped (shipped via BE36/FE37), `target_resolution` moved to
+FE48/BE42, and expanded to the full desktop bootstrap knob set — added `spacing_range`,
+`seed`, `save_points`, `save_every`. Could merge with FE48 into one "Advanced parameters"
+panel. Est: ~2 d.
 
 ### FIMEVAL-FE19 — Configurable, switchable basemaps
 
@@ -780,3 +804,301 @@ Out of Scope
 
 Notes: Extends FE20. The recolor half is trivial + can ship independently. Toggle lag is
 network-bound; mitigate by preloading the 5 single-class layers. Est: ~2–3 d.
+
+---
+
+## Review follow-ups (Nathan / swainn PR comments)
+
+Open items from the boss's merged-PR reviews (the rest were addressed in-thread).
+Numbers provisional — confirm against the tracker.
+
+### FIMEVAL-BE40 — Rename the remaining minio_* settings to generic S3 names
+
+Description: PR #4 follow-up. Only `minio_public_endpoint_url` was renamed (→
+`s3_public_endpoint_url`); three settings still reference minio (a dev tool) in
+`app.py`: `minio_endpoint_url`, `minio_access_key`, `minio_secret_key`. Rename to
+generic S3 names and update all references. This is a **breaking change** for
+existing deployments (the setting names change), so it needs a migration path.
+
+[  ]  Rename `minio_endpoint_url` → `s3_endpoint_url`, `minio_access_key` → `s3_access_key`, `minio_secret_key` → `s3_secret_key` in `app.py`; descriptions no longer mention minio
+[  ]  Update every reference (`controllers.py` `s3_config`, `storage.py`, tests, docs)
+[  ]  Migration note (README / HARDENING): deployments must re-enter these under the new names — or add a temporary fallback that reads the old names and warns
+[  ]  Tests green
+
+Out of Scope
+- The already-done `s3_public_endpoint_url` rename
+
+Notes: Nathan, PR #4 (2026-07). Breaking — coordinate the deployment setting update. Est: ~1 d.
+
+### FIMEVAL-BE41 — Push live job status over WebSockets (replace polling)
+
+Description: PR #1 follow-up. The Runs list and run-detail views poll
+`GET api/jobs` / the status endpoint every few seconds. Replace that with
+server-pushed updates (Django Channels / ASGI WebSocket consumer over the existing
+Daphne stack) so a running job's status streams to the frontend; keep polling as a
+fallback if the socket drops.
+
+[  ]  Backend WebSocket endpoint pushes per-user job status transitions (queued → running → complete/error)
+[  ]  Frontend subscribes and updates the Runs list + run detail live; falls back to polling on disconnect
+[  ]  Auth + per-user ownership enforced on the socket (no cross-user leakage)
+[  ]  ASGI/Channels routing documented (deployment notes)
+
+Out of Scope
+- Streaming full result payloads over the socket (results still fetched on demand)
+
+Notes: Nathan, PR #1 (2026-07) — flagged as a "pretty big refactor," not required
+at the time. Backend-led with a frontend consumer. Est: ~5–7 d.
+
+---
+
+## Desktop-app parity (functionality the web app is missing)
+
+Gaps found comparing the desktop FIMeval GUI (`random/FIMeval/fimpef_final/gui.py`)
+against the web app, 2026-08-26. Numbers provisional — confirm against the tracker.
+
+### FIMEVAL-BE42 — Accept a user-chosen target CRS + resolution at submit
+
+Description: The worker always reprojects to a fixed `EPSG:5070` (env `TARGET_CRS`) and
+only sets `target_resolution` via the size-guard downsample path. The desktop app lets the
+user set both up front (`gui.py` "Target CRS" default EPSG:5070, "Target Resolution (m)"
+default 10, blank = coarsest). `EvaluateFIM` already accepts `target_crs` /
+`target_resolution` — this ticket just plumbs user-chosen values through submit. Backend
+half of FE48; raised by Dipsikha (her desktop app has it).
+
+[  ]  Submit accepts optional `target_crs` (validated, e.g. via pyproj) and `target_resolution` (positive number); defaults preserved when unset (EPSG:5070 / coarsest input)
+[  ]  Threaded via `extended_properties` + `build_delayed` → `run_evaluate_fim_task` → `EvaluateFIM(target_crs=…, target_resolution=…)`
+[  ]  A user-set `target_resolution` coexists with the BE33 size guard (the guard may still tighten it further)
+[  ]  TDD
+
+Out of Scope
+- Per-input CRS; reprojection correctness (fimeval handles that)
+
+Notes: Dipsikha, 2026-08-26 demo. Pairs with FE48. Est: ~1 d.
+
+### FIMEVAL-FE48 — Target CRS + resolution controls in the wizard
+
+Description: Add optional **Target CRS** and **Target Resolution** controls to the New
+Evaluation wizard (an Advanced/optional section), defaulting to `EPSG:5070` and
+"auto (coarsest)". Mirrors the desktop app's fields so users aren't locked to CONUS Albers.
+
+[  ]  Advanced section: Target CRS (default `EPSG:5070`) + Target Resolution (blank = auto/coarsest)
+[  ]  Values sent to submit (`target_crs` / `target_resolution`); carried through re-evaluate (FE41)
+[  ]  Client-side validation (CRS format, positive resolution) with clear errors
+[  ]  Chosen values surface in the run's review / Input Files
+
+Out of Scope
+- `n_iterations` / `n_points` / `seed` (FE36 — sibling params panel)
+
+Notes: Dipsikha, 2026-08-26 demo (was proposed FE48 = "user-defined projection + resolution").
+Pairs with BE42. Overlaps FE36 — the two could ship as one combined "Advanced parameters"
+panel. ⚠ 2026-08-27 demo (Dipsikha): users **type in** their CRS + target resolution as
+**free-text inputs**, NOT a dropdown. Est: ~1–1.5 d.
+
+### FIMEVAL-BE43 — Building-Footprint (BF) evaluation
+
+Description: The desktop app offers a "Building Footprint Analysis" action
+(`gui.py:578-581` → `fimeval.EvaluationWithBuildingFootprint`) that counts building
+centroids landing on TP/FP/FN cells of the contingency raster and computes building-level
+CSI/FAR/POD plus a **Building Deviation Ratio (BDR)**, writing `BuildingCounts_<name>.csv`
++ a bar-chart PNG (`evaluationwithBF.py:377-483`). It auto-downloads Microsoft Building
+Footprints from ArcGIS when no layer is supplied (`arcgis_API.py:16-19`). The web app has
+none of this. Add BF evaluation as an option and surface its results. **FE + BE.**
+
+Backend
+[  ]  Worker path invokes `EvaluationWithBuildingFootprint(main_dir, method, output_dir, shapefile_dir=aoi)` (do **not** modify fimeval)
+[  ]  Optional user-supplied building-footprint layer; otherwise fimeval's ArcGIS auto-download (document the same USA-only/offline caveat as PWB)
+[  ]  BF outputs (BuildingCounts CSV, BDR + building CSI/FAR/POD, chart PNG) uploaded to the job outputs; exposed via an API endpoint
+[  ]  TDD (mock fimeval)
+
+Frontend
+[  ]  A way to request BF analysis (option at submit, or an action on a completed run)
+[  ]  Results view shows building-level metrics (CSI/FAR/POD + BDR) + building counts, and the chart if present
+
+Out of Scope
+- Modifying fimeval; new building metrics beyond what fimeval computes
+
+Notes: Desktop parity (`gui.py:578-581`, `evaluationwithBF.py:377-483`). Largest single
+desktop gap; depends on an AOI/boundary. Est: ~5–7 d.
+
+### FIMEVAL-BE44 — Permanent Water Body (PWB) layer support
+
+Description: fimeval **always** removes permanent water before scoring
+(`evaluationFIM.py:199-216`): if `PWB_dir` is given it uses that local shapefile, otherwise
+it queries a **USA-only ArcGIS REST API** (`water_bodies.py:64-65,201-206`) — a slow,
+external, USA-only dependency the web app **silently relies on today** (we never pass
+`PWB_dir`). Let users supply their own PWB layer and make the ArcGIS fallback explicit and
+graceful. **FE + BE.**
+
+Backend
+[  ]  Worker passes a user-supplied PWB shapefile via `PWB_dir` when provided (like the AOI boundary bundle)
+[  ]  ArcGIS fallback made explicit — opt-in or clearly logged/documented; degrades gracefully offline / for non-USA AOIs instead of silently failing or hanging
+[  ]  TDD (mock fimeval)
+
+Frontend
+[  ]  Optional "Permanent Water Body shapefile" upload in the wizard (reuse the AOI Dropzone; all parts / .zip)
+[  ]  Guidelines/welcome modal notes that without one, a USA-only ArcGIS layer is used
+
+Out of Scope
+- Bundling a global PWB dataset
+
+Notes: Desktop parity (`gui.py:180,186-189`; `evaluationFIM.py:199-216`;
+`water_bodies.py`). Doubles as a hardening fix — removes a hidden always-on external
+dependency. Est: ~2–3 d.
+
+---
+
+## Demo batch (2026-08-26 demo) — numbers confirmed from the tracker 2026-08-27
+
+Tracker titles use the prefix "BYU CIROH: FIMeval GUI – …". FE48/BE42 (target CRS +
+resolution) belong to this batch too — their bodies are in the desktop-parity section above.
+
+### FIMEVAL-FE47 — Documentation link inside the welcome modal
+
+Description: Team decision: the welcome popup adopts FIMbench's format with a direct link
+to project documentation. The FE40 modal currently has no doc link inside it (only the nav
+does). Add a docs callout/link in the welcome modal, matching FIMbench's style.
+
+[  ]  Welcome modal includes a clear Documentation link/callout that opens the docs page/route
+[  ]  Styled like FIMbench's modal docs callout
+[  ]  Keyboard-accessible
+
+Out of Scope
+- The docs content itself (FE49)
+
+Notes: 2026-08-26 demo decision. Builds on FE40. Est: ~0.25–0.5 d.
+
+### FIMEVAL-FE49 — Populate the in-app Documentation page
+
+Description: The app's `/docs` page is currently a placeholder. Populate it with real
+FIMeval documentation pulled from the FIMeval OG GitHub repo (+ the existing HTML site).
+Called out as an MVP requirement.
+
+[  ]  `/docs` renders the FIMeval documentation sourced from its OG GitHub repo (+ existing HTML site)
+[  ]  Navigable/readable in-app; images and links work
+[  ]  Reachable from the nav and the welcome-modal link (FE47)
+
+Out of Scope
+- FIMsim documentation (deliberately kept out of FIMeval tickets for now)
+- Live auto-sync from GitHub (one-time import for MVP unless specified)
+
+Notes: 2026-08-26 demo, MVP. Supported by Parvaneh + Dipsikha. The meeting notes'
+"FMAL" = FIMsim (transcription artifact); FIMsim docs were subsequently descoped. Est: ~2–3 d.
+
+### FIMEVAL-FE50 — Restore box plots for stratified & systematic sampling
+
+Description: Bug (backend, despite the FE number). The bootstrap box-plot endpoint
+(`api_job_bootstrap`) hard-coded the `Random_Sampling/` dir + `random_` filename prefix.
+Once stratified/systematic became selectable (BE36/FE37), those runs returned 404 → no box
+plots (only random rendered). fimeval writes each approach to its own dir/stem
+(`Random_Sampling/random_`, `Systematic_Sampling/systematic_`, `Stratified_Sampling/stratified_`).
+
+[x]  `api_job_bootstrap` matches any `*_Sampling/<approach>_*.csv` (random/systematic/stratified)
+[x]  Candidate name extracted regardless of approach; box-stats math unchanged
+[x]  Random still works; older jobs resolve
+[x]  TDD (stratified + systematic tests)
+
+Out of Scope
+- Frontend — `BootstrapBoxPlots` is generic, no change needed
+
+Notes: From the 2026-08-26 demo. Implemented 2026-08-27; awaiting manual test → commit. Est: ~0.5 d.
+
+### FIMEVAL-FE51 — Results table: whole-domain metrics + bootstrap median (labeled)
+
+Description: For bootstrap runs, the results should show both the whole-domain (all-pixels)
+metrics and the median of the bootstrap distribution, clearly labeled so users don't confuse
+them. fimeval already computes the whole-domain metrics — they live in an `evaluation/` CSV
+inside the bootstrap output folder. FE + small BE.
+
+[  ]  (BE) Expose the whole-domain metrics CSV (from the bootstrap run's `evaluation/` folder) via the metrics endpoint/response
+[  ]  (FE) Results table adds a "Bootstrap median" column (per metric, per candidate) alongside the whole-domain values
+[  ]  (FE) Clear labeling distinguishes "whole domain" vs "bootstrap (median)"
+[  ]  Non-bootstrap runs unaffected (whole-domain only)
+
+Out of Scope
+- Changing which metrics fimeval computes
+
+Notes: 2026-08-26 demo (Sagy/Dipsikha). Pairs with FE50. Est: ~1.5–2 d.
+
+---
+
+## Alpha release & demo bugs (2026-08-27 demo)
+
+### FIMEVAL-FE52 — "Alpha / lightweight version" notice + link to the full package
+
+Description: The team approved deploying a minimal/lightweight FIMeval to the CIROH portal
+for alpha testing; Sagy required that users be **clearly told it's the lightweight version**
+and directed to the full package. Add a clear, unmissable notice.
+
+[  ]  A visible "Alpha — lightweight version" indicator (header badge and/or a line in the welcome modal)
+[  ]  States it's a lightweight build + links to the full package (desktop / OG repo)
+[  ]  Unmissable on first use (ties into the FE40 welcome modal), non-intrusive after
+
+Out of Scope
+- Feature-gating lightweight vs. full behavior
+
+Notes: 2026-08-27 demo (Sagy). Alpha-release requirement. Est: ~0.5 d.
+
+### FIMEVAL-BE45 — Deploy the alpha (lightweight) build to the CIROH portal
+
+Description: Package and deploy the current FIMeval web app as the alpha/lightweight release
+on the CIROH core portal for testing by Dipsikha + Parvaneh. Deploying on the core portal
+auto-routes users through login (keeps the login-required workflow).
+
+[  ]  Build + deploy the app to the CIROH portal (alpha)
+[  ]  Login-required confirmed via the portal
+[  ]  Dask scheduler/worker + MinIO/S3 config verified in the portal environment
+[  ]  Testers (Dipsikha, Parvaneh) can reach it; feedback loop set up
+
+Out of Scope
+- HydroShare integration (future); anonymous-user access (postponed)
+
+Notes: 2026-08-27 demo decision. Deployment/ops — coordinate with Giovanni (portal). Est: ~1–2 d.
+
+### FIMEVAL-FE53 — 🐛 Bootstrap median not populating in the metrics table
+
+Description: Demo bug: the metrics table showed blank median values even though the medians
+appeared in the box-plots. FE51 added a "Bootstrap median" column — verify it actually
+populates. Likely cause: a metric-name mismatch between the whole-domain
+`EvaluationMetrics.csv` rows and the bootstrap stats keys (`BOOTSTRAP_METRICS`), which would
+render "—".
+
+[  ]  Reproduce on a bootstrap run; confirm whether FE51's median column populates
+[  ]  Align metric-name matching (case/labels) so medians populate for every shared metric
+[  ]  Add/adjust a test if the fix is code-side
+
+Out of Scope
+- Changing which metrics are computed
+
+Notes: 2026-08-27 demo (Reshma/Dinuke). Follow-up to FE51. Est: ~0.5 d.
+
+### FIMEVAL-FE54 — 🐛 Intersected Extent produces box plots instead of re-evaluating
+
+Description: Demo bug: selecting **Intersected Extent** (a Full Domain method) incorrectly
+generated box-plots instead of running/re-evaluating as a full-domain analysis. Box-plots
+must appear **only** for Bootstrap runs. Likely the results view renders box-plots whenever
+bootstrap data is present (e.g. stale from a prior run) and/or the re-evaluate flow didn't
+switch the method.
+
+[  ]  Reproduce (run / re-evaluate with Intersected Extent)
+[  ]  Box-plots render ONLY for bootstrap runs; Intersected Extent shows the metrics table + contingency map, no box-plots
+[  ]  If it's a re-evaluate bug: the newly chosen method is honored (no carryover of the prior run's bootstrap results)
+
+Out of Scope
+- (none)
+
+Notes: 2026-08-27 demo (Reshma/Dinuke). Est: ~0.5–1 d.
+
+### FIMEVAL-FE55 — Auto-refresh the in-app docs from the GitHub repo (FE49 follow-up)
+
+Description: FE49 bundled the FIMeval docs as a one-time import. The team expects the docs
+(bootstrap methods, intersected extents) to stay current with the GitHub repo. Add a
+mechanism to refresh the bundled docs from the OG repo so they don't drift.
+
+[  ]  Docs re-pull from `sdmlua/fimeval` at build time (or a scheduled sync), replacing the manual copy
+[  ]  Images handled; the page still renders offline from the last sync
+
+Out of Scope
+- Rendering arbitrary repo files
+
+Notes: 2026-08-27 demo ("docs auto-pulled from GitHub"). Follow-up to FE49 (a one-time
+import). Lower priority. Est: ~1 d.
