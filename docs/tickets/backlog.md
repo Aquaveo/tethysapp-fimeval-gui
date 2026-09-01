@@ -76,7 +76,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE50 | ✅ done | ~0.5 d |
 | FE51 | ✅ done | ~1.5–2 d |
 | FE52 | not started | ~0.5 d |
-| BE45 | not started | ~1–2 d |
+| BE45 | ~~struck~~ (Giovanni owns) | — |
 | FE53 | not started | ~0.5 d |
 | FE54 | ✅ done (via PR #15) | ~0.5–1 d |
 | FE55 | not started | ~1 d |
@@ -1052,7 +1052,9 @@ auto-routes users through login (keeps the login-required workflow).
 Out of Scope
 - HydroShare integration (future); anonymous-user access (postponed)
 
-Notes: 2026-08-27 demo decision. Deployment/ops — coordinate with Giovanni (portal). Est: ~1–2 d.
+Notes: 2026-08-27 demo decision. ~~Deployment/ops — coordinate with Giovanni (portal).~~
+**STRUCK 2026-09-01: Giovanni is deploying to the CIROH portal himself — nothing for us to do.**
+Kept for record only.
 
 ### FIMEVAL-FE53 — 🐛 Bootstrap median not populating in the metrics table
 
