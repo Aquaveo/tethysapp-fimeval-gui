@@ -14,6 +14,7 @@ import {
 } from './api';
 import type { OutputFile, JobMetrics, BootstrapStats, JobInputs } from './api';
 import BootstrapBoxPlots from './BootstrapBoxPlots';
+import { bootstrapMedian } from './bootstrapMetrics';
 import ContingencyMap from './ContingencyMap';
 import InputFiles from './InputFiles';
 import ErrorBoundary from './ErrorBoundary';
@@ -105,10 +106,11 @@ export default function ResultsView({ jobId }: { jobId: number }) {
     return row ? row.values[firstCand] ?? null : null;
   };
   // FE51: for bootstrap runs, show the whole-domain metric alongside the median
-  // of the bootstrap distribution (already returned by the bootstrap endpoint).
+  // of the bootstrap distribution. Names are normalized (FE53: "Acc" ↔
+  // "Accuracy") so the median lines up with its whole-domain row.
   const showBoot = !!(bootstrap && bootstrap.candidates.length > 0);
   const bootMedian = (metric: string, cand: string): number | null =>
-    bootstrap?.stats?.[cand]?.[metric]?.median ?? null;
+    bootstrapMedian(bootstrap, metric, cand);
   const headline = HEADLINE_METRICS
     .map((name) => ({ name, value: metricValue(name) }))
     .filter((h) => h.value !== null);
