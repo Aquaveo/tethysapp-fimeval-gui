@@ -898,6 +898,61 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertIn(response.status_code, [302, 403])
 
 
+class TestJobsListEndpoint(TethysTestCase):
+    """GET api/jobs/ (BE34): the Runs list. The stored DaskJob status stays
+    'submitted' forever, so the list must resolve the real terminal state from
+    the worker's S3 markers (same as the single-job endpoint) and carry the
+    bootstrap sub_method so the UI can label 'Bootstrap (Systematic)'."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_test_user(username='erin', password='pw', email='e@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def _make_job(self, props):
+        from tethys_sdk.jobs import DaskJob
+        from django.utils import timezone
+        job = MagicMock(spec=DaskJob)
+        job.id = 7
+        job._status = 'SUB'
+        job.user = self.user
+        job.creation_time = timezone.now()  # recent -> no never-started timeout
+        job.extended_properties = props
+        return job
+
+    def _list(self, job, marker_keys):
+        mock_storage = MagicMock()
+        mock_storage.list_prefix.return_value = marker_keys
+        with patch('tethysapp.fimeval_gui.controllers.App') as MockApp, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockApp.get_job_manager.return_value.list_jobs.return_value = [job]
+            response = self.client.get('/apps/fimeval-gui/api/jobs/')
+        self.assertEqual(response.status_code, 200)
+        return json.loads(response.content)['jobs']
+
+    def _props(self, upload_id, **extra):
+        p = {'upload_id': upload_id, 'user_id': str(self.user.id)}
+        p.update(extra)
+        return p
+
+    def test_list_resolves_complete_from_success_marker(self):
+        job = self._make_job(self._props('uidL', method='bootstrap', sub_method='systematic'))
+        jobs = self._list(job, [f'outputs/{self.user.id}/uidL/_SUCCESS'])
+        self.assertEqual(jobs[0]['status'], 'complete')
+
+    def test_list_resolves_error_from_failed_marker(self):
+        job = self._make_job(self._props('uidF', method='convex_hull'))
+        jobs = self._list(job, [f'outputs/{self.user.id}/uidF/_FAILED'])
+        self.assertEqual(jobs[0]['status'], 'error')
+
+    def test_list_includes_sub_method_and_method(self):
+        job = self._make_job(self._props('uidS', method='bootstrap', sub_method='stratified'))
+        jobs = self._list(job, [])
+        self.assertEqual(jobs[0]['method'], 'bootstrap')
+        self.assertEqual(jobs[0]['sub_method'], 'stratified')
+
+
 class TestOutputsEndpoint(TethysTestCase):
     def setUp(self):
         super().setUp()

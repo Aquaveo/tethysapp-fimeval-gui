@@ -5,18 +5,11 @@
 import { useEffect, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { fetchJobs, type Job } from './api';
+import { methodLabel } from './methodLabel';
 import './RunsList.css';
 
-const METHOD_LABELS: Record<string, string> = {
-  smallest_extent: 'Smallest extent',
-  convex_hull: 'Convex hull',
-  intersected_extent: 'Intersected extent',
-  bootstrap: 'Bootstrap',
-  AOI: 'AOI',
-};
-
 const STATUS: Record<Job['status'], { cls: string; label: string }> = {
-  complete: { cls: 'ok', label: 'Complete' },
+  complete: { cls: 'ok', label: 'Completed' },
   running: { cls: 'run', label: 'Running' },
   queued: { cls: 'run', label: 'Queued' },
   submitted: { cls: 'run', label: 'Submitted' },
@@ -97,7 +90,7 @@ export default function RunsList() {
                 <span className={`pill ${st.cls}`}>{st.label}</span>
               </div>
               <div className="run-method">
-                {j.method ? METHOD_LABELS[j.method] ?? j.method : '—'}
+                {methodLabel(j.method, j.sub_method)}
               </div>
               <div className="run-sub">{relTime(j.created)}</div>
             </button>
