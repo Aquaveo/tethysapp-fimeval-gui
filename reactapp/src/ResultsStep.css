@@ -1,8 +1,7 @@
 /* reactapp/src/ResultsStep.css */
 
 .results-step {
-  max-width: 75vw;
-  margin: 0 auto;
+  max-width: 100%;
   text-align: left;
 }
 

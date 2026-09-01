@@ -45,29 +45,34 @@ export default function AppShell() {
     <div className="wk-app">
       <Header />
       <div className="wk-body">
-        <nav className="wk-nav" aria-label="Primary">
+        {/* One consolidated left sidebar (FE44): New Evaluation, the Runs
+            previews, then Documentation / Guidelines / signed-in. */}
+        <nav className="wk-sidebar" aria-label="Primary">
           <NavLink to="/new" className="wk-new-btn">
             <span aria-hidden="true">＋</span> New Evaluation
           </NavLink>
-          <NavLink
-            to="/docs"
-            className={({ isActive }) => 'wk-nav-item' + (isActive ? ' is-active' : '')}
-          >
-            Documentation
-          </NavLink>
-          <button
-            type="button"
-            className="wk-nav-item wk-nav-btn"
-            onClick={() => setWelcomeOpen(true)}
-          >
-            Guidelines
-          </button>
-          <div className="wk-nav-foot">Signed in</div>
-        </nav>
 
-        <aside className="wk-runlist-col" aria-label="Runs">
-          <RunsList />
-        </aside>
+          <div className="wk-sidebar-runs">
+            <RunsList />
+          </div>
+
+          <div className="wk-sidebar-foot">
+            <NavLink
+              to="/docs"
+              className={({ isActive }) => 'wk-nav-item' + (isActive ? ' is-active' : '')}
+            >
+              Documentation
+            </NavLink>
+            <button
+              type="button"
+              className="wk-nav-item wk-nav-btn"
+              onClick={() => setWelcomeOpen(true)}
+            >
+              Guidelines
+            </button>
+            <div className="wk-nav-foot">Signed in</div>
+          </div>
+        </nav>
 
         <main className="wk-detail">
           <Outlet />

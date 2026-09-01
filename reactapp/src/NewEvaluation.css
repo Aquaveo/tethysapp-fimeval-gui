@@ -1,6 +1,6 @@
 /* reactapp/src/NewEvaluation.css — the guided New Evaluation wizard */
 
-.ne { max-width: 760px; }
+.ne { max-width: 920px; margin: 0 auto; }
 .ne-head { margin-bottom: 1.1rem; }
 .ne-head h2 { margin: 0 0 0.2rem; font-size: 1.4rem; letter-spacing: -0.01em; }
 .ne-head p { margin: 0; color: var(--color-text-muted); font-size: 0.9rem; }
