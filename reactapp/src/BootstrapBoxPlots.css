@@ -12,3 +12,23 @@
   color: var(--color-text-muted);
   font-size: 0.75rem;
 }
+
+.boxplot-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.boxplot-png {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: 7px;
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.boxplot-png:hover { background: var(--color-surface-alt); color: var(--color-text); }

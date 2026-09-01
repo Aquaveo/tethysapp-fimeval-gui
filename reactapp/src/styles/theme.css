@@ -28,6 +28,12 @@
 
   --shadow-sm: 0 0.25rem 0.75rem rgba(21, 36, 40, 0.05);
   --shadow-md: 0 0.5rem 1.25rem rgba(21, 36, 40, 0.08);
+
+  /* ===== Branded chrome (FIM-family header/footer banner) ===== */
+  --chrome-1: #0a1b34;
+  --chrome-2: #123458;
+  --chrome-text: #d1eff6;
+  --chrome-text-dim: #8fb2c4;
 }
 
 .button-primary {

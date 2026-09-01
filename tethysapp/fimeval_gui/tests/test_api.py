@@ -485,7 +485,8 @@ class TestSubmitEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_submit_wrong_method_returns_405(self):
-        response = self.client.get('/apps/fimeval-gui/api/jobs/')
+        # GET now lists jobs (BE34); an unsupported verb still 405s.
+        response = self.client.put('/apps/fimeval-gui/api/jobs/')
         self.assertEqual(response.status_code, 405)
 
     def test_submit_requires_login(self):
@@ -1696,4 +1697,66 @@ class TestBasemapsEndpoint(TethysTestCase):
     def test_post_not_allowed(self):
         self._set_setting(None)
         resp = self.client.post(self.URL)
+        self.assertEqual(resp.status_code, 405)
+
+
+class TestListJobsEndpoint(TethysTestCase):
+    URL = '/apps/fimeval-gui/api/jobs/'
+
+    def setUp(self):
+        super().setUp()
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.user = self.create_test_user(username='lister', password='pw', email='l@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        super().tearDown()
+
+    def _job(self, jid, method, status_code, user=None):
+        from tethys_sdk.jobs import DaskJob
+        from django.utils import timezone
+        j = MagicMock(spec=DaskJob)
+        j.id = jid
+        j.user = user if user is not None else self.user
+        j.extended_properties = {
+            'upload_id': f'u{jid}', 'user_id': str(j.user.id), 'method': method,
+        }
+        j.creation_time = timezone.now()
+        j._status = status_code
+        return j
+
+    def _set_jobs(self, jobs):
+        self.mock_app.get_job_manager.return_value.list_jobs.return_value = jobs
+
+    def test_get_jobs_lists_mine_newest_first(self):
+        self._set_jobs([self._job(51, 'bootstrap', 'COM'), self._job(52, 'AOI', 'RUN')])
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        jobs = json.loads(resp.content)['jobs']
+        self.assertEqual([j['job_id'] for j in jobs], [52, 51])   # newest first
+        self.assertEqual(jobs[1]['method'], 'bootstrap')
+        self.assertEqual(jobs[0]['status'], 'running')
+        self.assertEqual(jobs[0]['upload_id'], 'u52')
+
+    def test_get_jobs_excludes_other_users(self):
+        other = self.create_test_user(username='intruder', password='pw', email='i@b.com')
+        self._set_jobs([
+            self._job(60, 'bootstrap', 'COM'),
+            self._job(61, 'AOI', 'COM', user=other),
+        ])
+        resp = self.client.get(self.URL)
+        ids = [j['job_id'] for j in json.loads(resp.content)['jobs']]
+        self.assertEqual(ids, [60])
+
+    def test_get_jobs_empty(self):
+        self._set_jobs([])
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)['jobs'], [])
+
+    def test_put_not_allowed(self):
+        resp = self.client.put(self.URL)
         self.assertEqual(resp.status_code, 405)

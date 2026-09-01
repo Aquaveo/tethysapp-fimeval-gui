@@ -1,6 +1,7 @@
 // reactapp/src/BootstrapBoxPlots.tsx
 // Use the ESM build (clean `export default`). The CJS `lib/core` interops to an
 // object under Vite/rolldown, making the element type invalid at render time.
+import { useRef } from 'react';
 import ReactEChartsCore from 'echarts-for-react/esm/core';
 import * as echarts from 'echarts/core';
 import { BoxplotChart, ScatterChart } from 'echarts/charts';
@@ -71,7 +72,47 @@ function chartOption(
   };
 }
 
+// Minimal shape we need off the ECharts instance (avoids importing its full type).
+type ChartInstance = {
+  getDataURL: (opts?: { backgroundColor?: string }) => string;
+  getWidth: () => number;
+  getHeight: () => number;
+};
+
+// The SVG renderer's getDataURL yields an SVG data URL; paint it onto a canvas to
+// export a PNG (falls back to downloading the SVG if the browser can't rasterize).
+function downloadChartPng(inst: ChartInstance, filename: string) {
+  const svgUrl = inst.getDataURL({ backgroundColor: '#ffffff' });
+  const img = new Image();
+  img.onload = () => {
+    const w = img.naturalWidth || inst.getWidth();
+    const h = img.naturalHeight || inst.getHeight();
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale;
+    canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    a.click();
+  };
+  img.onerror = () => {
+    const a = document.createElement('a');
+    a.href = svgUrl;
+    a.download = filename.replace(/\.png$/, '.svg');
+    a.click();
+  };
+  img.src = svgUrl;
+}
+
 function BootstrapBoxPlots({ data }: Props) {
+  const instances = useRef<Record<string, ChartInstance>>({});
   return (
     <div className="results-panel">
       <div className="results-panel-title">
@@ -83,12 +124,25 @@ function BootstrapBoxPlots({ data }: Props) {
       </div>
       {data.candidates.map((cand) => (
         <div className="boxplot-block" key={cand}>
-          {data.candidates.length > 1 && <div className="boxplot-cand">{cand}</div>}
+          <div className="boxplot-block-head">
+            {data.candidates.length > 1 && <div className="boxplot-cand">{cand}</div>}
+            <button
+              type="button"
+              className="boxplot-png"
+              onClick={() => {
+                const inst = instances.current[cand];
+                if (inst) downloadChartPng(inst, `boxplot_${cand}.png`);
+              }}
+            >
+              ⬇ PNG
+            </button>
+          </div>
           <ReactEChartsCore
             echarts={echarts}
             option={chartOption(data.metrics, data.stats[cand] ?? {})}
             style={{ height: 300 }}
             opts={{ renderer: 'svg' }}
+            onChartReady={(inst: ChartInstance) => { instances.current[cand] = inst; }}
           />
         </div>
       ))}

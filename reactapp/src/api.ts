@@ -224,6 +224,21 @@ export async function getJobStatus(jobId: number): Promise<JobStatus> {
   return response.json();
 }
 
+// A row in the user's run history (GET api/jobs, BE34), for the Runs list.
+export interface Job {
+  job_id: number;
+  method: string | null;
+  status: JobStatus['status'];
+  created: string | null;
+  upload_id: string;
+}
+
+export async function fetchJobs(): Promise<Job[]> {
+  const response = await fetch(`${API_BASE}/jobs/`, { credentials: 'same-origin' });
+  if (!response.ok) return parseError(response);
+  return (await response.json()).jobs as Job[];
+}
+
 export interface OutputFile {
   name: string;
   key: string;
