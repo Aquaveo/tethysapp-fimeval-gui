@@ -685,7 +685,10 @@ class TestStatusEndpoint(TethysTestCase):
         mock_future = MagicMock()
         mock_future.status = 'pending'  # ephemeral -> running -> marker fallback
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = keys
+        # Marker resolution probes exact keys via etag(); a key "exists" iff it's
+        # in `keys` (None otherwise, matching S3Storage.etag on a 404).
+        present = set(keys)
+        mock_storage.etag.side_effect = lambda k: 'etag' if k in present else None
         # The error path reads the _FAILED marker body for a reason; give the
         # mock an empty body so serialization stays valid.
         empty_body = MagicMock()
@@ -750,7 +753,11 @@ class TestStatusEndpoint(TethysTestCase):
         mock_future = MagicMock()
         mock_future.status = 'pending'
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = ['outputs/1/uid1/_RUNNING']
+        # Only the _RUNNING marker exists (worker started, then died mid-task);
+        # exact-key probing promotes it to 'running', then the running timeout fires.
+        mock_storage.etag.side_effect = (
+            lambda k: 'etag' if k == 'outputs/1/uid1/_RUNNING' else None
+        )
         empty = MagicMock()
         empty.read.return_value = b''
         mock_storage.get_object.return_value = {'Body': empty}
@@ -777,7 +784,7 @@ class TestStatusEndpoint(TethysTestCase):
         mock_future = MagicMock()
         mock_future.status = 'pending'  # -> queued
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = []  # no worker markers = never started
+        mock_storage.etag.return_value = None  # no worker markers = never started
         empty = MagicMock()
         empty.read.return_value = b''
         mock_storage.get_object.return_value = {'Body': empty}
@@ -845,12 +852,15 @@ class TestStatusEndpoint(TethysTestCase):
         self.assertEqual(data['inputs']['candidates'][0]['crs'], 'EPSG:5070')
         mock_storage.get_object.assert_called_with('outputs/1/uid1/inputs.json')
 
-    def test_status_running_when_outputs_but_no_marker(self):
-        # Outputs present but the terminal marker hasn't landed yet — must NOT
-        # report complete (this is the race that blanked Results).
+    def test_status_stays_queued_without_running_marker(self):
+        # Partial outputs but no _RUNNING/_SUCCESS/_FAILED marker: status is
+        # resolved by exact marker probes, so this stays 'queued' — and crucially
+        # must NOT report 'complete' (the race that blanked Results). Real workers
+        # write _RUNNING before any output, so this state doesn't occur in
+        # practice; the guarantee that matters is "no marker => not complete".
         self.assertEqual(
             self._status_with_keys(['outputs/1/uid1/case_study/x/ContingencyMap.tif']),
-            'running',
+            'queued',
         )
 
     def test_status_returns_queued_when_no_outputs_in_s3(self):
@@ -923,7 +933,10 @@ class TestJobsListEndpoint(TethysTestCase):
 
     def _list(self, job, marker_keys):
         mock_storage = MagicMock()
-        mock_storage.list_prefix.return_value = marker_keys
+        # Marker resolution probes exact keys via etag(); a key "exists" iff it's
+        # in marker_keys (None otherwise, matching S3Storage.etag on a 404).
+        present = set(marker_keys)
+        mock_storage.etag.side_effect = lambda k: 'etag' if k in present else None
         with patch('tethysapp.fimeval_gui.controllers.App') as MockApp, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
             MockApp.get_job_manager.return_value.list_jobs.return_value = [job]
@@ -951,6 +964,29 @@ class TestJobsListEndpoint(TethysTestCase):
         jobs = self._list(job, [])
         self.assertEqual(jobs[0]['method'], 'bootstrap')
         self.assertEqual(jobs[0]['sub_method'], 'stratified')
+
+    def test_list_running_job_not_marked_error(self):
+        # Regression (Copilot #16): a genuinely running job — _RUNNING marker
+        # present, no _SUCCESS, created longer ago than the never-started timeout —
+        # must read 'running', not flip to 'error'. The Runs list only ever sees
+        # raw status 'submitted' (persisted SUB), so promotion must treat
+        # 'submitted' like 'queued'.
+        import datetime
+        from django.utils import timezone
+        job = self._make_job(self._props('uidR', method='convex_hull'))
+        job.creation_time = timezone.now() - datetime.timedelta(minutes=5)
+        jobs = self._list(job, [f'outputs/{self.user.id}/uidR/_RUNNING'])
+        self.assertEqual(jobs[0]['status'], 'running')
+
+    def test_list_legacy_job_ignores_newer_run_marker(self):
+        # Regression (Copilot #16/#15): a legacy job (no run_id) reads prefix
+        # outputs/<user>/<upload>/. A later re-evaluation's _SUCCESS lives in a
+        # <run_id>/ subtree — exact-key probing must NOT attribute it to the legacy
+        # job (basename matching of descendants would).
+        job = self._make_job(self._props('uidLegacy', method='convex_hull'))  # no run_id
+        newer_run_success = f'outputs/{self.user.id}/uidLegacy/deadbeef/_SUCCESS'
+        jobs = self._list(job, [newer_run_success])
+        self.assertNotEqual(jobs[0]['status'], 'complete')
 
 
 class TestOutputsEndpoint(TethysTestCase):

@@ -749,16 +749,29 @@ def _resolve_marker_status(status, job, props):
         upload_id = props.get('upload_id')
         user_id = props.get('user_id')
         if upload_id and user_id:
+            prefix = _output_prefix(user_id, upload_id, props.get('run_id'))
             try:
-                names = {
-                    k.rsplit('/', 1)[-1]
-                    for k in _get_storage().list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
-                }
-                if '_FAILED' in names:
+                storage = _get_storage()
+                # Probe the exact marker keys the worker writes (<prefix>_RUNNING /
+                # _SUCCESS / _FAILED) rather than listing the whole prefix. Two
+                # reasons: (1) the Runs list resolves every job on each poll, and
+                # persisted status stays 'submitted', so a prefix listing per job
+                # would paginate all outputs on every refresh — exact HEADs are
+                # O(1); (2) a legacy (run_id-less) job's prefix is
+                # outputs/<user>/<upload>/, whose listing also contains a later
+                # re-evaluation's <run_id>/ markers — matching those by basename
+                # would misreport its status. Exact keys stay scoped to this run.
+                if storage.etag(prefix + '_FAILED') is not None:
                     status = 'error'
-                elif '_SUCCESS' in names:
+                elif storage.etag(prefix + '_SUCCESS') is not None:
                     status = 'complete'
-                elif status == 'queued' and names:
+                elif storage.etag(prefix + '_RUNNING') is not None:
+                    # A worker has picked the job up (it writes _RUNNING first).
+                    # Promote 'submitted' too, not just 'queued': the Runs list
+                    # can't distinguish them (persisted status is always
+                    # 'submitted'), so keying only on 'queued' left a live run
+                    # stuck 'submitted' until the never-started timeout wrongly
+                    # failed it.
                     status = 'running'
             except (ClientError, BotoCoreError) as exc:
                 logger.warning('S3 marker check failed for job %s: %s', getattr(job, 'id', '?'), exc)
