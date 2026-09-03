@@ -35,6 +35,14 @@ def _get_storage():
     )
 
 
+def _output_prefix(user_id, upload_id, run_id=None):
+    """S3 prefix for a run's outputs. Runs are namespaced by ``run_id`` so
+    re-evaluating the same upload doesn't collide with (or read back) a prior
+    run's results; legacy runs (no run_id) fall back to the flat prefix."""
+    base = f'outputs/{user_id}/{upload_id}/'
+    return f'{base}{run_id}/' if run_id else base
+
+
 def _get_owned_job(request, job_id):
     """Look up a DaskJob by id and confirm the requester owns it.
 
@@ -449,7 +457,7 @@ CONTINGENCY_COLORMAP = {
 }
 
 
-def _contingency_cog_src(user_id, upload_id):
+def _contingency_cog_src(user_id, upload_id, run_id=None):
     """rio-tiler source for a job's contingency COG. Production reads it from S3
     via GDAL /vsis3 with the app's S3 credentials in the environment."""
     import os as _os
@@ -461,7 +469,7 @@ def _contingency_cog_src(user_id, upload_id):
         _os.environ['AWS_HTTPS'] = 'YES' if endpoint.startswith('https') else 'NO'
         _os.environ['AWS_VIRTUAL_HOSTING'] = 'FALSE'
     bucket = App.get_custom_setting('s3_bucket')
-    return f'/vsis3/{bucket}/outputs/{user_id}/{upload_id}/contingency.cog.tif'
+    return f'/vsis3/{bucket}/{_output_prefix(user_id, upload_id, run_id)}contingency.cog.tif'
 
 
 @controller(url='api/jobs', login_required=True, name='api_jobs_submit')
@@ -636,16 +644,20 @@ def api_jobs_submit(request):
         job_type=DaskJob,
         scheduler=scheduler,
     )
+    # Per-run output namespace so re-evaluating the same upload (new method /
+    # sampling) doesn't collide with or read back a prior run's results.
+    run_id = uuid.uuid4().hex
     job.extended_properties = {
         'upload_id': upload_id,
         'user_id': user_id,
         'method': method,
         'target_resolution': target_resolution,
         'sub_method': sub_method,
+        'run_id': run_id,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
-        target_resolution=target_resolution, sub_method=sub_method,
+        target_resolution=target_resolution, sub_method=sub_method, run_id=run_id,
     )
 
     try:
@@ -769,7 +781,7 @@ def api_job_status(request, job_id):
             try:
                 names = {
                     k.rsplit('/', 1)[-1]
-                    for k in _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/')
+                    for k in _get_storage().list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
                 }
                 if '_FAILED' in names:
                     status = 'error'
@@ -810,7 +822,7 @@ def api_job_status(request, job_id):
             try:
                 reason = (
                     _get_storage()
-                    .get_object(f'outputs/{user_id}/{upload_id}/_FAILED')['Body']
+                    .get_object(_output_prefix(user_id, upload_id, props.get('run_id')) + '_FAILED')['Body']
                     .read()
                     .decode('utf-8', 'replace')
                     .strip()
@@ -837,7 +849,7 @@ def api_job_status(request, job_id):
         try:
             inputs = json_module.loads(
                 _get_storage()
-                .get_object(f'outputs/{user_id}/{upload_id}/inputs.json')['Body']
+                .get_object(_output_prefix(user_id, upload_id, props.get('run_id')) + 'inputs.json')['Body']
                 .read()
             )
         except (ClientError, BotoCoreError, KeyError, ValueError) as exc:
@@ -865,7 +877,7 @@ def api_job_tilejson(request, job_id):
     if err:
         return err
     props = job.extended_properties or {}
-    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'))
+    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'), props.get('run_id'))
     from rio_tiler.constants import WGS84_CRS
     from rio_tiler.io import Reader
     try:
@@ -899,7 +911,7 @@ def api_job_tile(request, job_id, z, x, tile):
     except (TypeError, ValueError):
         return HttpResponse(status=400)
     props = job.extended_properties or {}
-    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'))
+    src = _contingency_cog_src(props.get('user_id'), props.get('upload_id'), props.get('run_id'))
     from rio_tiler.io import Reader
     from rio_tiler.errors import TileOutsideBounds
     try:
@@ -934,7 +946,7 @@ def api_job_outputs(request, job_id):
         return JsonResponse({'error': 'job has no outputs'}, status=404)
 
     try:
-        keys = _get_storage().list_prefix(f'outputs/{user_id}/{upload_id}/')
+        keys = _get_storage().list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
     except (ClientError, BotoCoreError) as exc:
         logger.error('S3 list failed for job %s: %s', job_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
@@ -968,7 +980,7 @@ def api_job_download(request, job_id):
     props = job.extended_properties or {}
     upload_id = props.get('upload_id')
     user_id = props.get('user_id')
-    if not file_key.startswith(f'outputs/{user_id}/{upload_id}/'):
+    if not file_key.startswith(_output_prefix(user_id, upload_id, props.get('run_id'))):
         return JsonResponse({'error': 'access denied'}, status=403)
 
     storage = _get_storage()
@@ -1006,7 +1018,7 @@ def api_job_metrics(request, job_id):
 
     storage = _get_storage()
     try:
-        keys = storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+        keys = storage.list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
         metrics_key = next(
             (k for k in keys if k.split('/')[-1] == 'EvaluationMetrics.csv'), None
         )
@@ -1056,7 +1068,7 @@ def api_job_download_all(request, job_id):
     if not upload_id or not user_id:
         return JsonResponse({'error': 'no outputs yet'}, status=404)
 
-    prefix = f'outputs/{user_id}/{upload_id}/'
+    prefix = _output_prefix(user_id, upload_id, props.get('run_id'))
     storage = _get_storage()
 
     # Stream every output object into a ZIP backed by a temp file (rolled to
@@ -1166,7 +1178,7 @@ def api_job_bootstrap(request, job_id):
         # systematic / stratified), not just random (FE50).
         matched = sorted(
             (name, k)
-            for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+            for k in storage.list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
             if (name := _bootstrap_candidate_name(k)) is not None
         )
         if not matched:

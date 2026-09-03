@@ -174,6 +174,31 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
 
     @mock_aws
     @patch('fimeval.EvaluateFIM')
+    def test_run_id_namespaces_output(self, mock_eval):
+        # A run_id puts all outputs under outputs/<user>/<upload>/<run_id>/ so
+        # re-evaluating the same upload doesn't collide with a prior run.
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'intersected_extent', S3_CONFIG, run_id='run7')
+
+        keys = [
+            obj['Key']
+            for page in s3.get_paginator('list_objects_v2').paginate(
+                Bucket=BUCKET, Prefix='outputs/1/abc/'
+            )
+            for obj in page.get('Contents', [])
+        ]
+        self.assertTrue(keys)
+        self.assertTrue(all(k.startswith('outputs/1/abc/run7/') for k in keys), keys)
+        self.assertTrue(any(k.endswith('/_SUCCESS') for k in keys), keys)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
     def test_no_metrics_writes_failed_marker_and_raises(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)
