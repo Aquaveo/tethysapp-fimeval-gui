@@ -149,6 +149,11 @@ class TestUploadEndpoint(TethysTestCase):
             _validate_upload(SimpleNamespace(name='big.tif', size=MAX_UPLOAD_BYTES + 1), RASTER_EXT)
         )
 
+    def test_default_upload_cap_is_2gb(self):
+        # BE38: the team set a 2 GB per-file ceiling (env-overridable).
+        from tethysapp.fimeval_gui.controllers import MAX_UPLOAD_BYTES
+        self.assertEqual(MAX_UPLOAD_BYTES, 2 * 1024 * 1024 * 1024)
+
     def test_upload_stores_benchmark_in_s3(self):
         benchmark = SimpleUploadedFile('benchmark_2024.tif', b'bench data', content_type='image/tiff')
         candidate = SimpleUploadedFile('candidate_A.tif', b'cand data', content_type='image/tiff')
@@ -312,10 +317,23 @@ class TestSubmitEndpoint(TethysTestCase):
         self._put_benchmark(upload_id)
         self._put_candidate(upload_id)
 
-    def _submit(self, upload_id, method='smallest_extent', downsample=False):
+    def _put_manifest(self, upload_id, names):
+        """Stage the presign manifest that maps renamed keys -> original names
+        (BE30), which BE37's naming checks read."""
+        user_id = str(self.user.id)
+        boto3.client('s3', region_name='us-east-1').put_object(
+            Bucket=BUCKET,
+            Key=f'uploads/{user_id}/{upload_id}/manifest.json',
+            Body=json.dumps({'names': names}).encode('utf-8'),
+        )
+
+    def _submit(self, upload_id, method='intersected_extent', downsample=False,
+                sub_method=None):
         payload = {'upload_id': upload_id, 'method': method}
         if downsample:
             payload['downsample'] = True
+        if sub_method is not None:
+            payload['sub_method'] = sub_method
         return self.client.post(
             '/apps/fimeval-gui/api/jobs/',
             data=json.dumps(payload),
@@ -394,11 +412,88 @@ class TestSubmitEndpoint(TethysTestCase):
         # coarsens (otherwise "Accept" would OOM again).
         self.assertEqual(self.mock_job.extended_properties['target_resolution'], 30.0)
 
+    def test_submit_bootstrap_defaults_to_stratified(self):
+        # BE36: when no sampling approach is given, bootstrap defaults to
+        # stratified (replacing the previously hardcoded 'random').
+        self._put_upload('u_bs')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_bs', method='bootstrap')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.mock_job.extended_properties['sub_method'], 'stratified')
+
+    def test_submit_accepts_each_valid_sub_method(self):
+        for sm in ('random', 'systematic', 'stratified'):
+            self._put_upload(f'u_{sm}')
+            with patch(
+                'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+                return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+            ):
+                response = self._submit(f'u_{sm}', method='bootstrap', sub_method=sm)
+            self.assertEqual(response.status_code, 202, sm)
+            self.assertEqual(self.mock_job.extended_properties['sub_method'], sm)
+
+    def test_submit_rejects_invalid_sub_method(self):
+        self._put_upload('u_badsm')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_badsm', method='bootstrap', sub_method='bogus')
+        self.assertEqual(response.status_code, 400)
+
+    # ── BE37: benchmark input validation ──
+    def test_submit_rejects_benchmark_without_bm_token(self):
+        self._put_upload('u_nobm')
+        self._put_manifest('u_nobm', {'benchmark.tif': 'region.tif', 'candidate_0.tif': 'cand.tif'})
+        response = self._submit('u_nobm')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('BM', json.loads(response.content)['error'])
+
+    def test_submit_accepts_benchmark_with_bm_token(self):
+        self._put_upload('u_bm')
+        self._put_manifest('u_bm', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'cand.tif'})
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_bm')
+        self.assertEqual(response.status_code, 202)
+
+    def test_submit_rejects_candidate_with_bm_token(self):
+        self._put_upload('u_cbm')
+        self._put_manifest('u_cbm', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'other_BM.tif'})
+        response = self._submit('u_cbm')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Benchmark', json.loads(response.content)['error'])
+
+    def test_submit_rejects_candidate_identical_to_benchmark(self):
+        # Same raster in both slots (the BE29 OOM/timeout case) → reject.
+        self._put_benchmark('u_iden', body=b'IDENTICAL-RASTER-BYTES')
+        self._put_candidate('u_iden', body=b'IDENTICAL-RASTER-BYTES')
+        self._put_manifest('u_iden', {'benchmark.tif': 'region_BM.tif', 'candidate_0.tif': 'cand.tif'})
+        response = self._submit('u_iden')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('identical', json.loads(response.content)['error'].lower())
+
+    def test_submit_without_manifest_skips_bm_check(self):
+        # Legacy/non-presign uploads have no manifest → BM checks are skipped
+        # (byte-identical still applies); a normal job still submits.
+        self._put_upload('u_nomani')
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            response = self._submit('u_nomani')
+        self.assertEqual(response.status_code, 202)
+
     def test_submit_returns_job_id_and_status(self):
         self._put_upload('u1')
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'u1', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 202)
@@ -422,6 +517,12 @@ class TestSubmitEndpoint(TethysTestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_submit_rejects_smallest_extent(self):
+        # FE37: Smallest Extent is removed from the offered methods and from the
+        # backend VALID_METHODS, so a submit requesting it is rejected.
+        self._put_upload('u_se')
+        self.assertEqual(self._submit('u_se', method='smallest_extent').status_code, 400)
 
     def test_submit_accepts_bootstrap(self):
         self._put_upload('u_bs')
@@ -471,7 +572,7 @@ class TestSubmitEndpoint(TethysTestCase):
     def test_submit_rejects_missing_upload_id(self):
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'method': 'smallest_extent'}),
+            data=json.dumps({'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 400)
@@ -479,7 +580,7 @@ class TestSubmitEndpoint(TethysTestCase):
     def test_submit_returns_404_for_unknown_upload_id(self):
         response = self.client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'nonexistent', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'nonexistent', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 404)
@@ -493,7 +594,7 @@ class TestSubmitEndpoint(TethysTestCase):
         client = self.get_test_client()  # not logged in
         response = client.post(
             '/apps/fimeval-gui/api/jobs/',
-            data=json.dumps({'upload_id': 'u1', 'method': 'smallest_extent'}),
+            data=json.dumps({'upload_id': 'u1', 'method': 'intersected_extent'}),
             content_type='application/json',
         )
         self.assertIn(response.status_code, [302, 403])
@@ -1306,6 +1407,36 @@ class TestBootstrapEndpoint(TethysTestCase):
         self.assertAlmostEqual(csi['max'], 0.5)
         self.assertEqual(csi['outliers'], [])
         self.assertEqual(csi['n'], 5)
+
+    def test_returns_box_stats_for_stratified(self):
+        # FE50: box plots must work for stratified sampling, not just random.
+        key = 'outputs/1/uid1/case_study/bootstrap/Stratified_Sampling/stratified_candidate_0.csv'
+        job = self._make_job()
+        job.extended_properties['sub_method'] = 'stratified'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage',
+                   return_value=self._storage(keys=[self.OTHER_KEY, key])):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['candidates'], ['candidate_0'])
+        self.assertAlmostEqual(body['stats']['candidate_0']['CSI']['median'], 0.3)
+
+    def test_returns_box_stats_for_systematic(self):
+        # FE50: box plots must work for systematic sampling too.
+        key = 'outputs/1/uid1/case_study/bootstrap/Systematic_Sampling/systematic_candidate_0.csv'
+        job = self._make_job()
+        job.extended_properties['sub_method'] = 'systematic'
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage',
+                   return_value=self._storage(keys=[self.OTHER_KEY, key])):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['candidates'], ['candidate_0'])
+        self.assertAlmostEqual(body['stats']['candidate_0']['CSI']['median'], 0.3)
 
     def test_detects_outliers(self):
         csv_text = (

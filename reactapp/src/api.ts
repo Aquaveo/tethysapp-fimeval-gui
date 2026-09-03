@@ -160,9 +160,11 @@ export async function submitJob(
   uploadId: string,
   method: string,
   downsample = false,
+  subMethod?: string,
 ): Promise<SubmitResult> {
   const payload: Record<string, unknown> = { upload_id: uploadId, method };
   if (downsample) payload.downsample = true;
+  if (subMethod) payload.sub_method = subMethod;
   const response = await fetch(`${API_BASE}/jobs/`, {
     method: 'POST',
     credentials: 'same-origin',

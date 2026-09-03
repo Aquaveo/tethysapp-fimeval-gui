@@ -1,6 +1,8 @@
 /* reactapp/src/RunDetail.css — the run detail pane */
 
-.rd { max-width: 900px; }
+/* Cap the width and center, so the detail content has equal breathing room on
+   both sides instead of spanning the whole (now wider) pane. */
+.rd { max-width: 1200px; margin: 0 auto; }
 .rd-head { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1.1rem; }
 .rd-head h2 { margin: 0; font-size: 1.4rem; letter-spacing: -0.01em; }
 

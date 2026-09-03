@@ -4,6 +4,7 @@ import json as json_module
 import logging
 import math
 import os
+import re
 import statistics
 import tempfile
 import uuid
@@ -134,7 +135,7 @@ def _env_int(name, default):
 # can size them to its worker pool / storage without editing code.
 RASTER_EXT = {'.tif', '.tiff'}
 MAX_CANDIDATES = _env_int('FIMEVAL_MAX_CANDIDATES', 10)
-MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 1024 * 1024 * 1024)  # 1 GB/file
+MAX_UPLOAD_BYTES = _env_int('FIMEVAL_MAX_UPLOAD_BYTES', 2 * 1024 * 1024 * 1024)  # 2 GB/file (BE38)
 
 # The worker clips candidates to the benchmark extent (BE31), so the benchmark's
 # own pixel count bounds the working memory. A benchmark above this budget would
@@ -247,6 +248,15 @@ def _validate_filename(name, allowed_exts):
     if ext not in allowed_exts:
         return f"'{name}': unsupported file type (allowed: {', '.join(sorted(allowed_exts))})"
     return None
+
+
+def _has_bm_token(filename: str) -> bool:
+    """True if *filename* has a distinct ``bm`` token (splitting on ``_-.`` and
+    whitespace), mirroring how fimeval recognizes a benchmark (BE37).
+    ``Region_BM.tif`` -> True; ``BLEBM_24947028.tif`` -> False (``bm`` isn't a
+    separate token)."""
+    stem = os.path.splitext(os.path.basename(filename or ''))[0].lower()
+    return 'bm' in re.split(r'[_\-.\s]+', stem)
 
 
 @controller(url='api/upload', login_required=True, name='api_upload')
@@ -417,7 +427,11 @@ def api_upload_presign(request):
     return JsonResponse({'upload_id': upload_id, 'targets': targets})
 
 
-VALID_METHODS = {'smallest_extent', 'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
+# Smallest Extent was removed (FE37) — the UI no longer offers it and the backend
+# rejects it. Full Domain = convex_hull / intersected_extent / AOI; sampling = bootstrap.
+VALID_METHODS = {'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
+# Bootstrap sampling approaches fimeval's run_bootstrap accepts (BE36).
+VALID_SUB_METHODS = {'random', 'systematic', 'stratified'}
 
 # Control-plane objects the worker writes to the output prefix (terminal markers
 # + the input-metadata file + the internal contingency tiling COG); not
@@ -478,6 +492,15 @@ def api_jobs_submit(request):
     if method not in VALID_METHODS:
         return JsonResponse({'error': f'method must be one of {sorted(VALID_METHODS)}'}, status=400)
 
+    # Bootstrap sampling approach (BE36). Only meaningful for the bootstrap
+    # method; ignored by the others. Defaults to 'stratified' when unspecified.
+    sub_method = body.get('sub_method') or 'stratified'
+    if sub_method not in VALID_SUB_METHODS:
+        return JsonResponse(
+            {'error': f'sub_method must be one of {sorted(VALID_SUB_METHODS)}'},
+            status=400,
+        )
+
     user_id = str(request.user.id)
     storage = _get_storage()
 
@@ -529,6 +552,52 @@ def api_jobs_submit(request):
         _basename(k) for k, size in sizes.items()
         if _basename(k).startswith('candidate_') and k.endswith('.tif') and size > 0
     )
+
+    # BE37: benchmark input validation. Read the presign manifest (original
+    # filenames). The "BM" naming checks are best-effort — skipped for legacy
+    # uploads with no manifest — but the byte-identical check always runs.
+    try:
+        names = json_module.loads(
+            storage.get_object(f'{prefix}manifest.json')['Body'].read()
+        ).get('names', {})
+    except (ClientError, BotoCoreError, ValueError):
+        names = {}
+
+    if names:
+        bench_name = names.get('benchmark.tif', '')
+        if not _has_bm_token(bench_name):
+            return JsonResponse({'error': (
+                'The benchmark file name must include a distinct "BM" marker '
+                f"(e.g. Region_BM.tif) so it's clearly the benchmark — '{bench_name}' "
+                'does not. Rename it and re-upload.'
+            )}, status=400)
+        for cname in candidate_names:
+            orig = names.get(cname, '')
+            if _has_bm_token(orig):
+                return JsonResponse({'error': (
+                    f'"{orig}" looks like a benchmark (its name contains "BM"). '
+                    'Did you mean to add it as the Benchmark raster? Add it as the '
+                    'Benchmark, or rename the candidate.'
+                )}, status=400)
+
+    # Reject a candidate byte-identical to the benchmark (same raster in both
+    # slots → the BE29 OOM/timeout case). ETag = content MD5 for our single-PUT
+    # uploads, so identical files share it.
+    bench_key = f'{prefix}benchmark.tif'
+    try:
+        bench_etag = storage.etag(bench_key)
+        bench_size = sizes.get(bench_key, 0)
+        if bench_etag is not None:
+            for cname in candidate_names:
+                ckey = f'{prefix}{cname}'
+                if sizes.get(ckey, 0) == bench_size and storage.etag(ckey) == bench_etag:
+                    return JsonResponse({'error': (
+                        'A candidate is identical to the benchmark — choose a '
+                        'different candidate.'
+                    )}, status=400)
+    except (ClientError, BotoCoreError):
+        pass  # storage hiccup on the integrity check — don't block the run
+
     downsample = bool(body.get('downsample'))
     target_resolution = None
     est = _estimate_working_pixels(_get_storage(), prefix, candidate_names)
@@ -572,10 +641,11 @@ def api_jobs_submit(request):
         'user_id': user_id,
         'method': method,
         'target_resolution': target_resolution,
+        'sub_method': sub_method,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
-        target_resolution=target_resolution,
+        target_resolution=target_resolution, sub_method=sub_method,
     )
 
     try:
@@ -1019,8 +1089,30 @@ def api_job_download_all(request, job_id):
 
 
 # Metrics visualized as bootstrap distributions. These match the column headers
-# fimeval writes in Random_Sampling/random_<candidate>.csv.
+# fimeval writes in <Approach>_Sampling/<approach>_<candidate>.csv.
 BOOTSTRAP_METRICS = ['CSI', 'POD', 'FAR', 'F1', 'MCC', 'Kappa', 'Accuracy']
+
+# fimeval writes each bootstrap sampling approach to its own dir + filename stem
+# (FE50 — the endpoint used to hard-code only Random_Sampling/random_, so
+# stratified/systematic runs returned no box plots).
+_SAMPLING_DIRS = (
+    ('Random_Sampling', 'random_'),
+    ('Systematic_Sampling', 'systematic_'),
+    ('Stratified_Sampling', 'stratified_'),
+)
+
+
+def _bootstrap_candidate_name(key):
+    """If ``key`` is a bootstrap sampling CSV (any approach), return the
+    candidate name (filename minus the ``<approach>_`` prefix and ``.csv``);
+    otherwise None."""
+    if not key.endswith('.csv'):
+        return None
+    fname = key.split('/')[-1]
+    for folder, prefix in _SAMPLING_DIRS:
+        if f'/{folder}/' in key and fname.startswith(prefix):
+            return fname[len(prefix):-len('.csv')]
+    return None
 
 
 def _box_stats(values):
@@ -1070,19 +1162,19 @@ def api_job_bootstrap(request, job_id):
 
     storage = _get_storage()
     try:
-        keys = sorted(
-            k for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
-            if '/Random_Sampling/' in k
-            and k.split('/')[-1].startswith('random_')
-            and k.endswith('.csv')
+        # Match the sampling CSVs of whichever approach this job ran (random /
+        # systematic / stratified), not just random (FE50).
+        matched = sorted(
+            (name, k)
+            for k in storage.list_prefix(f'outputs/{user_id}/{upload_id}/')
+            if (name := _bootstrap_candidate_name(k)) is not None
         )
-        if not keys:
+        if not matched:
             return JsonResponse({'error': 'no bootstrap results'}, status=404)
 
         candidates = []
         stats = {}
-        for key in keys:
-            name = key.split('/')[-1][len('random_'):-len('.csv')]
+        for name, key in matched:
             raw = storage.get_object(key)['Body'].read().decode('utf-8', errors='replace')
             series = {m: [] for m in BOOTSTRAP_METRICS}
             for row in csv.DictReader(io.StringIO(raw)):

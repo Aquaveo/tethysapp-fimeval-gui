@@ -4,10 +4,7 @@
 // results (ResultsView). Polls until the run reaches a terminal state.
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  getJobStatus, submitJob, SubmitTooLargeError,
-  type JobStatus, type TooLargeInfo,
-} from './api';
+import { getJobStatus, type JobStatus } from './api';
 import InputFiles from './InputFiles';
 import ResultsView from './ResultsView';
 import './RunDetail.css';
@@ -42,9 +39,6 @@ export default function RunDetail() {
   const [entry, setEntry] = useState<{ id: number; status: JobStatus } | null>(null);
   const [failedId, setFailedId] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [rerunning, setRerunning] = useState(false);
-  const [rerunErr, setRerunErr] = useState<string | null>(null);
-  const [tooLarge, setTooLarge] = useState<{ info: TooLargeInfo; uploadId: string } | null>(null);
 
   const status = entry?.id === id ? entry.status : null;
   const failed = failedId === id && status === null;
@@ -82,27 +76,22 @@ export default function RunDetail() {
 
   const method = status?.method ? METHOD_LABELS[status.method] ?? status.method : null;
   const terminal = !!status && (status.status === 'complete' || status.status === 'error');
-  const canRerun = !!status?.upload_id && !!status?.method;
+  const canReevaluate = !!status?.upload_id && !!status?.method;
 
-  // Re-run the same inputs (no re-upload) — resubmit upload_id + method, then open
-  // the new run. Reuses the FE24 too-large/downsample modal.
-  const rerun = async (downsample = false) => {
+  // Re-evaluate (FE41): open the New Evaluation wizard pre-loaded with this run's
+  // inputs (no re-upload), jumping to the Method step so the user can pick a
+  // different method/sampling. The wizard handles submit + the too-large modal.
+  const reEvaluate = () => {
     if (!status?.upload_id || !status.method) return;
-    setRerunErr(null);
-    setTooLarge(null);
-    setRerunning(true);
-    try {
-      const { job_id } = await submitJob(status.upload_id, status.method, downsample);
-      navigate(`/runs/${job_id}`);
-    } catch (e) {
-      if (e instanceof SubmitTooLargeError && status.upload_id) {
-        setTooLarge({ info: e.info, uploadId: status.upload_id });
-      } else {
-        setRerunErr(e instanceof Error ? e.message : 'Re-run failed. Please try again.');
-      }
-    } finally {
-      setRerunning(false);
-    }
+    navigate('/new', {
+      state: {
+        reuse: {
+          uploadId: status.upload_id,
+          method: status.method,
+          hasBoundary: !!status.inputs?.boundary,
+        },
+      },
+    });
   };
 
   return (
@@ -112,14 +101,12 @@ export default function RunDetail() {
         {status && (
           <span className={`rd-status ${status.status}`}>{STATUS_LABEL[status.status]}</span>
         )}
-        {terminal && canRerun && (
-          <button type="button" className="rd-rerun" disabled={rerunning} onClick={() => rerun()}>
-            ↻ Re-run
+        {terminal && canReevaluate && (
+          <button type="button" className="rd-rerun" onClick={reEvaluate}>
+            ↻ Re-evaluate
           </button>
         )}
       </header>
-
-      {rerunErr && <div className="rd-errbox" role="alert"><p>{rerunErr}</p></div>}
 
       {status === null && !failed && (
         <div className="rd-center"><span className="rd-spinner" aria-hidden="true" />Loading&hellip;</div>
@@ -157,23 +144,6 @@ export default function RunDetail() {
       )}
 
       {status?.status === 'complete' && <ResultsView jobId={id} />}
-
-      {tooLarge && (
-        <div className="rd-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="rd-modal">
-            <h3 className="rd-modal-title">This evaluation is large</h3>
-            <p className="rd-modal-body">{tooLarge.info.error}</p>
-            <div className="rd-modal-actions">
-              <button type="button" className="button-secondary" onClick={() => setTooLarge(null)} disabled={rerunning}>
-                Cancel
-              </button>
-              <button type="button" className="button-primary" onClick={() => rerun(true)} disabled={rerunning}>
-                Run at a coarser resolution
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

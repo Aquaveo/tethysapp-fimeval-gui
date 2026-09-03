@@ -80,6 +80,19 @@ class S3Storage:
                 return False
             raise
 
+    def etag(self, key: str) -> str | None:
+        """Return the object's ETag (quotes stripped), or None if it's missing.
+        For single-PUT uploads the ETag is the content MD5, so two identical
+        files share an ETag — used to detect a candidate identical to the
+        benchmark (BE37)."""
+        try:
+            resp = self._client.head_object(Bucket=self._bucket, Key=key)
+        except ClientError as e:
+            if e.response['Error']['Code'] in ('404', 'NoSuchKey'):
+                return None
+            raise
+        return (resp.get('ETag') or '').strip('"') or None
+
     def download_to_path(self, key: str, dest_path: str) -> None:
         """Download ``key`` to the local ``dest_path``."""
         self._client.download_file(self._bucket, key, dest_path)

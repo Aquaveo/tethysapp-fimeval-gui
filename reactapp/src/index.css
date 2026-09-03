@@ -26,3 +26,16 @@ button {
 #root {
   min-height: 100vh;
 }
+
+/* Thinner scrollbars app-wide (vertical + horizontal). */
+* {
+  scrollbar-width: thin;                                  /* Firefox */
+  scrollbar-color: var(--color-border) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }          /* Chromium/WebKit */
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+*::-webkit-scrollbar-track { background: transparent; }

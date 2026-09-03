@@ -3,23 +3,59 @@
 // Reuses the presign → direct-to-MinIO upload → submit path and the FE24
 // too-large/downsample modal; on success it routes to the new run (no pop-up).
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import { presignUpload, putFile, submitJob, SubmitTooLargeError, type TooLargeInfo } from './api';
 import './NewEvaluation.css';
 
-type Method = 'smallest_extent' | 'convex_hull' | 'intersected_extent' | 'bootstrap' | 'AOI';
+// Full Domain methods evaluate *every* pixel in the chosen domain; Bootstrap
+// *samples* pixels (on top of the Intersected Extent analysis) to build a
+// distribution for each metric. Smallest Extent was removed (FE37).
+type Method = 'convex_hull' | 'intersected_extent' | 'bootstrap' | 'AOI';
+type SubMethod = 'random' | 'stratified' | 'systematic';
 type FileProgress = { name: string; pct: number; failed: boolean };
 
 const SHAPEFILE_EXTS = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj'];
 
-const METHODS: { value: Method; label: string; desc: string }[] = [
-  { value: 'bootstrap', label: 'Bootstrap (random sampling)', desc: 'Resampled distribution of each metric — shows the box-plot.' },
-  { value: 'smallest_extent', label: 'Smallest extent', desc: 'Evaluate over the overlapping extent of the inputs.' },
-  { value: 'convex_hull', label: 'Convex hull', desc: 'Evaluate within the convex hull of the wet cells.' },
-  { value: 'intersected_extent', label: 'Intersected extent', desc: 'Evaluate only where both maps have data.' },
-  { value: 'AOI', label: 'Area of interest (AOI)', desc: 'Evaluate inside an uploaded boundary shapefile.' },
+// The three "Full Domain" methods (all evaluate every pixel). Intersected
+// Extent is the default.
+const FULL_DOMAIN: { value: Method; label: string; desc: string }[] = [
+  { value: 'intersected_extent', label: 'Intersected Extent', desc: 'Evaluate every pixel where both maps have data. (Default)' },
+  { value: 'convex_hull', label: 'Convex Hull', desc: 'Evaluate all pixels within the convex hull of the wet cells.' },
+  { value: 'AOI', label: 'Area of Interest (AOI)', desc: 'Evaluate all pixels inside an uploaded boundary shapefile.' },
 ];
+
+// Bootstrap sampling approaches. Stratified is the default.
+const SAMPLING: { value: SubMethod; label: string; desc: string }[] = [
+  { value: 'stratified', label: 'Stratified', desc: 'Sample proportionally across strata. (Default)' },
+  { value: 'random', label: 'Random', desc: 'Uniform random sample of points each iteration.' },
+  { value: 'systematic', label: 'Systematic', desc: 'Sample on a randomized grid spacing each iteration.' },
+];
+
+// Re-evaluate (FE41): the wizard can be opened pre-loaded with an existing run's
+// already-uploaded inputs, passed via router state from RunDetail.
+type ReuseState = { uploadId: string; method: string; hasBoundary: boolean };
+
+const METHOD_VALUES: Method[] = ['intersected_extent', 'convex_hull', 'AOI', 'bootstrap'];
+function coerceMethod(m: string): Method {
+  // Old runs may carry a now-removed method (e.g. smallest_extent) — fall back.
+  return (METHOD_VALUES as string[]).includes(m) ? (m as Method) : 'intersected_extent';
+}
+
+function methodSummary(method: Method, subMethod: SubMethod): string {
+  if (method === 'bootstrap') {
+    const s = SAMPLING.find((x) => x.value === subMethod)?.label ?? subMethod;
+    return `Bootstrap — ${s} sampling`;
+  }
+  return FULL_DOMAIN.find((m) => m.value === method)?.label ?? method;
+}
+
+// Mirror of the backend BE37 check: a distinct "bm" token in the filename
+// ("Region_BM.tif" -> true; "BLEBM_1.tif" -> false).
+function hasBmToken(filename: string): boolean {
+  const stem = filename.replace(/\.[^.]*$/, '').toLowerCase();
+  return stem.split(/[_\-.\s]+/).includes('bm');
+}
 
 function mergeUnique(prev: File[], incoming: File[]): File[] {
   const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
@@ -28,20 +64,47 @@ function mergeUnique(prev: File[], incoming: File[]): File[] {
 
 export default function NewEvaluation() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
+  const location = useLocation();
+  const reuse = (location.state as { reuse?: ReuseState } | null)?.reuse;
+  const reuseMode = !!reuse;
+  const reuseUploadId = reuse?.uploadId ?? null;
+  const reuseHasBoundary = !!reuse?.hasBoundary;
+
+  // In reuse mode the files are already uploaded — start at Method (step 2).
+  const [step, setStep] = useState(reuseMode ? 2 : 1);
   const [benchmark, setBenchmark] = useState<File | null>(null);
   const [candidates, setCandidates] = useState<File[]>([]);
   const [boundary, setBoundary] = useState<File[]>([]);
-  const [method, setMethod] = useState<Method>('bootstrap');
+  const [method, setMethod] = useState<Method>(
+    reuse ? coerceMethod(reuse.method) : 'intersected_extent',
+  );
+  const [subMethod, setSubMethod] = useState<SubMethod>('stratified');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<FileProgress[] | null>(null);
   const [tooLarge, setTooLarge] = useState<{ info: TooLargeInfo; uploadId: string } | null>(null);
 
   const isAOI = method === 'AOI';
+  const isBootstrap = method === 'bootstrap';
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
-  const step1Valid = benchmark !== null && candidates.length > 0;
-  const step2Valid = !isAOI || hasShp;
+
+  // BE37 benchmark-input validation (block before upload).
+  const benchmarkBmError = benchmark && !hasBmToken(benchmark.name)
+    ? `The benchmark filename should include a distinct "BM" marker (e.g. Region_BM.tif) — "${benchmark.name}" doesn't.`
+    : null;
+  const bmCandidates = candidates.filter((c) => hasBmToken(c.name));
+  const candidateBmError = bmCandidates.length > 0
+    ? `${bmCandidates.map((c) => `"${c.name}"`).join(', ')} look${bmCandidates.length === 1 ? 's' : ''} like a benchmark ("BM" in the name). Did you mean to add ${bmCandidates.length === 1 ? 'it' : 'one'} as the Benchmark? Remove it, or move it to the Benchmark slot.`
+    : null;
+  const dupNameError = benchmark && candidates.some((c) => c.name === benchmark.name)
+    ? 'A candidate has the same name as the benchmark — pick a different candidate.'
+    : null;
+
+  const step1Valid = benchmark !== null && candidates.length > 0
+    && !benchmarkBmError && !candidateBmError && !dupNameError;
+  // In reuse mode we can't add a boundary (no upload step), so AOI is only valid
+  // if the reused run already has one.
+  const step2Valid = reuseMode ? (!isAOI || reuseHasBoundary) : (!isAOI || hasShp);
 
   const addCandidates = (files: File[]) => setCandidates((p) => mergeUnique(p, files));
   const removeCandidate = (i: number) => setCandidates((p) => p.filter((_, idx) => idx !== i));
@@ -49,6 +112,29 @@ export default function NewEvaluation() {
   const removeBoundary = (i: number) => setBoundary((p) => p.filter((_, idx) => idx !== i));
 
   const runEvaluation = async () => {
+    // Re-evaluate (FE41): inputs are already uploaded — skip presign/upload and
+    // submit the existing upload directly. Too-large modal still applies.
+    if (reuseMode && reuseUploadId) {
+      setError(null);
+      setTooLarge(null);
+      setSubmitting(true);
+      try {
+        const { job_id } = await submitJob(
+          reuseUploadId, method, false, isBootstrap ? subMethod : undefined,
+        );
+        navigate(`/runs/${job_id}`);
+      } catch (e) {
+        if (e instanceof SubmitTooLargeError) {
+          setTooLarge({ info: e.info, uploadId: reuseUploadId });
+        } else {
+          setError(e instanceof Error ? e.message : 'Submission failed. Please try again.');
+        }
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (!benchmark) return;
     setError(null);
     setTooLarge(null);
@@ -90,7 +176,9 @@ export default function NewEvaluation() {
         ),
       );
 
-      const { job_id } = await submitJob(upload_id, method);
+      const { job_id } = await submitJob(
+        upload_id, method, false, isBootstrap ? subMethod : undefined,
+      );
       navigate(`/runs/${job_id}`);
     } catch (e) {
       if (e instanceof SubmitTooLargeError && uploadId) {
@@ -112,7 +200,9 @@ export default function NewEvaluation() {
     setError(null);
     setSubmitting(true);
     try {
-      const { job_id } = await submitJob(uploadId, method, true);
+      const { job_id } = await submitJob(
+        uploadId, method, true, isBootstrap ? subMethod : undefined,
+      );
       navigate(`/runs/${job_id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Submission failed. Please try again.');
@@ -160,6 +250,7 @@ export default function NewEvaluation() {
                   onClick={() => setBenchmark(null)}>✕</button>
               </div>
             )}
+            {benchmarkBmError && <p className="ne-hint ne-hint-err">{benchmarkBmError}</p>}
 
             <span className="ne-label">Candidate raster(s)</span>
             <Dropzone label="Drop one or more .tif here" multiple accept={['.tif', '.tiff']}
@@ -175,25 +266,73 @@ export default function NewEvaluation() {
                 ))}
               </div>
             )}
+            {candidateBmError && <p className="ne-hint ne-hint-err">{candidateBmError}</p>}
+            {dupNameError && <p className="ne-hint ne-hint-err">{dupNameError}</p>}
           </div>
         )}
 
         {step === 2 && (
           <div className="ne-body">
-            <div className="ne-methods">
-              {METHODS.map((m) => (
-                <button key={m.value} type="button"
-                  className={`ne-method${method === m.value ? ' sel' : ''}`}
-                  onClick={() => setMethod(m.value)}>
+            {reuseMode && (
+              <div className="ne-reuse-note">
+                Re-using this run&rsquo;s inputs — no need to re-upload. Pick a method and run.
+              </div>
+            )}
+            <section className="ne-mgroup">
+              <h4 className="ne-mgroup-title">Full Domain</h4>
+              <p className="ne-mgroup-sub">Evaluate <strong>every pixel</strong> in the chosen domain.</p>
+              <div className="ne-methods">
+                {FULL_DOMAIN.map((m) => (
+                  <button key={m.value} type="button"
+                    className={`ne-method${method === m.value ? ' sel' : ''}`}
+                    onClick={() => setMethod(m.value)}>
+                    <span className="ne-mradio" aria-hidden="true" />
+                    <span>
+                      <span className="ne-mt">{m.label}</span>
+                      <span className="ne-md">{m.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="ne-mgroup">
+              <h4 className="ne-mgroup-title">Bootstrap</h4>
+              <p className="ne-mgroup-sub">
+                <strong>Sample</strong> pixels many times to build a distribution for each metric (shown as box-plots).
+                Runs on top of the <strong>Intersected Extent</strong> full-domain analysis.
+              </p>
+              <div className="ne-methods">
+                <button type="button"
+                  className={`ne-method${isBootstrap ? ' sel' : ''}`}
+                  onClick={() => setMethod('bootstrap')}>
                   <span className="ne-mradio" aria-hidden="true" />
                   <span>
-                    <span className="ne-mt">{m.label}</span>
-                    <span className="ne-md">{m.desc}</span>
+                    <span className="ne-mt">Bootstrap</span>
+                    <span className="ne-md">Resampled distribution of each metric.</span>
                   </span>
                 </button>
-              ))}
-            </div>
-            {isAOI && (
+              </div>
+              {isBootstrap && (
+                <div className="ne-subsampling">
+                  <span className="ne-label">Sampling approach</span>
+                  <div className="ne-methods">
+                    {SAMPLING.map((s) => (
+                      <button key={s.value} type="button"
+                        className={`ne-method${subMethod === s.value ? ' sel' : ''}`}
+                        onClick={() => setSubMethod(s.value)}>
+                        <span className="ne-mradio" aria-hidden="true" />
+                        <span>
+                          <span className="ne-mt">{s.label}</span>
+                          <span className="ne-md">{s.desc}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+            {isAOI && !reuseMode && (
               <div className="ne-aoi">
                 <span className="ne-label">AOI boundary shapefile (all parts)</span>
                 <Dropzone label="Drop the shapefile parts (.shp, .shx, .dbf, .prj…)" multiple
@@ -214,17 +353,36 @@ export default function NewEvaluation() {
                 )}
               </div>
             )}
+            {isAOI && reuseMode && (
+              <div className="ne-aoi">
+                <span className="ne-label">AOI boundary</span>
+                {reuseHasBoundary ? (
+                  <p className="ne-hint">Using the boundary shapefile from the previous run.</p>
+                ) : (
+                  <p className="ne-hint">
+                    This run has no AOI boundary. To evaluate against an AOI, start a{' '}
+                    <strong>New Evaluation</strong> and upload a boundary shapefile.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {step === 3 && (
           <div className="ne-body">
-            <div className="ne-review-row"><span className="ne-k">Benchmark</span><span>{benchmark?.name}</span></div>
-            <div className="ne-review-row"><span className="ne-k">Candidates</span><span>{candidates.map((c) => c.name).join(', ')}</span></div>
-            {isAOI && (
-              <div className="ne-review-row"><span className="ne-k">Boundary</span><span>{boundary.map((b) => b.name).join(', ')}</span></div>
+            {reuseMode ? (
+              <div className="ne-review-row"><span className="ne-k">Inputs</span><span>Re-using this run&rsquo;s uploaded files</span></div>
+            ) : (
+              <>
+                <div className="ne-review-row"><span className="ne-k">Benchmark</span><span>{benchmark?.name}</span></div>
+                <div className="ne-review-row"><span className="ne-k">Candidates</span><span>{candidates.map((c) => c.name).join(', ')}</span></div>
+                {isAOI && (
+                  <div className="ne-review-row"><span className="ne-k">Boundary</span><span>{boundary.map((b) => b.name).join(', ')}</span></div>
+                )}
+              </>
             )}
-            <div className="ne-review-row"><span className="ne-k">Method</span><span>{METHODS.find((m) => m.value === method)?.label}</span></div>
+            <div className="ne-review-row"><span className="ne-k">Method</span><span>{methodSummary(method, subMethod)}</span></div>
           </div>
         )}
       </div>
@@ -246,7 +404,8 @@ export default function NewEvaluation() {
       )}
 
       <div className="ne-nav">
-        <button type="button" className="button-secondary" disabled={step === 1 || submitting}
+        <button type="button" className="button-secondary"
+          disabled={step === 1 || (reuseMode && step === 2) || submitting}
           onClick={() => setStep(step - 1)}>← Back</button>
         <button type="button" className="button-primary" disabled={nextDisabled} onClick={next}>
           {submitting ? 'Working…' : step === 3 ? 'Run evaluation' : 'Next →'}
