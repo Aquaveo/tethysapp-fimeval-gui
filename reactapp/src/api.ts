@@ -213,6 +213,7 @@ export interface JobStatus {
   created: string | null;
   completed: string | null;
   method: string | null;
+  sub_method: string | null;
   upload_id: string | null;
   reason: string | null;
   inputs: JobInputs | null;
@@ -230,6 +231,7 @@ export async function getJobStatus(jobId: number): Promise<JobStatus> {
 export interface Job {
   job_id: number;
   method: string | null;
+  sub_method: string | null;
   status: JobStatus['status'];
   created: string | null;
   upload_id: string;

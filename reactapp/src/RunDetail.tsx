@@ -5,21 +5,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getJobStatus, type JobStatus } from './api';
+import { methodLabel } from './methodLabel';
 import InputFiles from './InputFiles';
 import ResultsView from './ResultsView';
 import './RunDetail.css';
 
-const METHOD_LABELS: Record<string, string> = {
-  smallest_extent: 'Smallest extent',
-  convex_hull: 'Convex hull',
-  intersected_extent: 'Intersected extent',
-  bootstrap: 'Bootstrap',
-  AOI: 'AOI',
-};
-
 const STATUS_LABEL: Record<JobStatus['status'], string> = {
   submitted: 'Submitted', queued: 'Queued', running: 'Running',
-  complete: 'Complete', error: 'Error',
+  complete: 'Completed', error: 'Error',
 };
 
 function fmtElapsed(ms: number): string {
@@ -74,7 +67,7 @@ export default function RunDetail() {
     return () => clearInterval(t);
   }, [running]);
 
-  const method = status?.method ? METHOD_LABELS[status.method] ?? status.method : null;
+  const method = status?.method ? methodLabel(status.method, status.sub_method) : null;
   const terminal = !!status && (status.status === 'complete' || status.status === 'error');
   const canReevaluate = !!status?.upload_id && !!status?.method;
 

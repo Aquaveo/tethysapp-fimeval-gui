@@ -33,6 +33,21 @@
 .wk-brand-logo { height: 2.5rem; width: auto; object-fit: contain; display: block; flex: 0 0 auto; }
 /* Dark ink title + dark-green tagline, matching FIMbench (readable on the banner). */
 .wk-title { margin: 0; font-size: 1.375rem; font-weight: 700; letter-spacing: 0.3px; color: var(--color-text); }
+/* Alpha / lightweight-version badge (FE52). */
+.wk-alpha-badge {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+  padding: 0.08rem 0.45rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7a4a00;
+  background: #ffcf70;
+  border: 1px solid #e0a94a;
+  border-radius: 999px;
+}
 .wk-tagline { margin: 1px 0 0; font-size: 0.8125rem; color: #1b4332; }
 .wk-header-actions { display: flex; align-items: center; gap: 0.6rem; }
 /* Documentation button — FIMbench scheme: filled cyan + ink text; darker cyan on

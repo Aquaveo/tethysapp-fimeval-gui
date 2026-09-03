@@ -709,10 +709,16 @@ def _list_user_jobs(request):
             continue
         props = j.extended_properties or {}
         created = getattr(j, 'creation_time', None)
+        # Resolve the real terminal state from the worker's S3 markers — the stored
+        # DaskJob status stays 'submitted' forever, so the list would otherwise never
+        # advance to Completed/Error the way the single-job endpoint does.
+        raw = _TETHYS_TO_STATUS.get(getattr(j, '_status', None), 'submitted')
+        status, _, _ = _resolve_marker_status(raw, j, props)
         out.append({
             'job_id': j.id,
             'method': props.get('method'),
-            'status': _TETHYS_TO_STATUS.get(getattr(j, '_status', None), 'submitted'),
+            'sub_method': props.get('sub_method'),
+            'status': status,
             'created': created.isoformat() if created else None,
             'upload_id': props.get('upload_id'),
         })
@@ -730,6 +736,56 @@ _JOB_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_TIMEOUT_SECONDS', 30 * 60)
 # with no _RUNNING marker (e.g. the Dask worker is down, or the pool is saturated).
 # Kept separate from the running timeout so a legitimate heavy run isn't cut off (BE35).
 _JOB_START_TIMEOUT_SECONDS = _env_int('FIMEVAL_JOB_START_TIMEOUT_SECONDS', 120)
+
+
+def _resolve_marker_status(status, job, props):
+    """Resolve a non-terminal status against the S3 markers the worker writes
+    (_RUNNING / _SUCCESS / _FAILED) and the wall-clock timeouts. Shared by the
+    single-job status endpoint and the Runs-list endpoint so both report the real
+    terminal state (not a stale 'submitted'). Storage is built lazily — only a
+    non-terminal status needs a marker read. Returns
+    ``(status, timed_out, never_started)``."""
+    if status in ('running', 'submitted', 'queued'):
+        upload_id = props.get('upload_id')
+        user_id = props.get('user_id')
+        if upload_id and user_id:
+            prefix = _output_prefix(user_id, upload_id, props.get('run_id'))
+            try:
+                storage = _get_storage()
+                # Probe the exact marker keys the worker writes (<prefix>_RUNNING /
+                # _SUCCESS / _FAILED) rather than listing the whole prefix. Two
+                # reasons: (1) the Runs list resolves every job on each poll, and
+                # persisted status stays 'submitted', so a prefix listing per job
+                # would paginate all outputs on every refresh — exact HEADs are
+                # O(1); (2) a legacy (run_id-less) job's prefix is
+                # outputs/<user>/<upload>/, whose listing also contains a later
+                # re-evaluation's <run_id>/ markers — matching those by basename
+                # would misreport its status. Exact keys stay scoped to this run.
+                if storage.etag(prefix + '_FAILED') is not None:
+                    status = 'error'
+                elif storage.etag(prefix + '_SUCCESS') is not None:
+                    status = 'complete'
+                elif storage.etag(prefix + '_RUNNING') is not None:
+                    # A worker has picked the job up (it writes _RUNNING first).
+                    # Promote 'submitted' too, not just 'queued': the Runs list
+                    # can't distinguish them (persisted status is always
+                    # 'submitted'), so keying only on 'queued' left a live run
+                    # stuck 'submitted' until the never-started timeout wrongly
+                    # failed it.
+                    status = 'running'
+            except (ClientError, BotoCoreError) as exc:
+                logger.warning('S3 marker check failed for job %s: %s', getattr(job, 'id', '?'), exc)
+
+    timed_out = False
+    never_started = False
+    creation_time = getattr(job, 'creation_time', None)
+    if status == 'running' and creation_time:
+        if (timezone.now() - creation_time).total_seconds() > _JOB_TIMEOUT_SECONDS:
+            status, timed_out = 'error', True
+    elif status in ('queued', 'submitted') and creation_time:
+        if (timezone.now() - creation_time).total_seconds() > _JOB_START_TIMEOUT_SECONDS:
+            status, never_started = 'error', True
+    return status, timed_out, never_started
 
 
 @controller(url='api/jobs/{job_id}', login_required=True, name='api_job_status')
@@ -773,43 +829,8 @@ def api_job_status(request, job_id):
     # set is present (so /metrics and /bootstrap won't race), and _FAILED makes
     # a no-output run terminal instead of polling forever. (Live Dask
     # 'finished'/'error' are trusted directly — the worker returns only on
-    # success and raises on failure.)
-    if status in ('running', 'submitted', 'queued'):
-        upload_id = props.get('upload_id')
-        user_id = props.get('user_id')
-        if upload_id and user_id:
-            try:
-                names = {
-                    k.rsplit('/', 1)[-1]
-                    for k in _get_storage().list_prefix(_output_prefix(user_id, upload_id, props.get('run_id')))
-                }
-                if '_FAILED' in names:
-                    status = 'error'
-                elif '_SUCCESS' in names:
-                    status = 'complete'
-                elif status == 'queued' and names:
-                    # _RUNNING marker — or partial outputs from a pre-marker
-                    # worker — means a worker has picked the job up.
-                    status = 'running'
-            except (ClientError, BotoCoreError) as exc:
-                logger.warning('S3 marker check failed for job %s: %s', job_id, exc)
-
-    # Wall-clock safety net: a running job that never reached a terminal state
-    # is reported as a terminal error past the timeout so the UI stops polling.
-    timed_out = False
-    never_started = False
-    if status == 'running' and job.creation_time:
-        age = (timezone.now() - job.creation_time).total_seconds()
-        if age > _JOB_TIMEOUT_SECONDS:
-            status = 'error'
-            timed_out = True
-    # Never-started net (BE35): still queued/submitted with no _RUNNING marker means
-    # no worker took it — fail fast, long before the running timeout above.
-    elif status in ('queued', 'submitted') and job.creation_time:
-        age = (timezone.now() - job.creation_time).total_seconds()
-        if age > _JOB_START_TIMEOUT_SECONDS:
-            status = 'error'
-            never_started = True
+    # success and raises on failure.) The same resolution powers the Runs list.
+    status, timed_out, never_started = _resolve_marker_status(status, job, props)
 
     # On failure, surface the reason the worker wrote into the _FAILED marker
     # (fimeval's captured error) so the UI can show it instead of a generic
@@ -861,6 +882,7 @@ def api_job_status(request, job_id):
         'created': job.creation_time.isoformat() if job.creation_time else None,
         'completed': job.completion_time.isoformat() if job.completion_time else None,
         'method': props.get('method'),
+        'sub_method': props.get('sub_method'),
         'upload_id': props.get('upload_id'),
         'reason': reason,
         'inputs': inputs,

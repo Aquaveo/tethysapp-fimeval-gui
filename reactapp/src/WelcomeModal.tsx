@@ -89,6 +89,14 @@ export default function WelcomeModal({ open, onClose, dontShow, onDontShowChange
             two match and differ.
           </p>
 
+          <div className="wk-welcome-alpha" role="note">
+            <strong>Alpha — lightweight version.</strong> This build is for testing and is
+            sized for moderate inputs. For large case studies or the full feature set, use the{' '}
+            <a href="https://github.com/sdmlua/fimeval" target="_blank" rel="noopener noreferrer">
+              full FIMeval package
+            </a>.
+          </div>
+
           <h3 className="wk-welcome-h3">Before you start</h3>
           <ul className="wk-welcome-list">
             <li>
