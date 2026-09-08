@@ -1124,7 +1124,25 @@ def api_job_download_all(request, job_id):
 
 # Metrics visualized as bootstrap distributions. These match the column headers
 # fimeval writes in <Approach>_Sampling/<approach>_<candidate>.csv.
-BOOTSTRAP_METRICS = ['CSI', 'POD', 'FAR', 'F1', 'MCC', 'Kappa', 'Accuracy']
+# Columns in a bootstrap sampling CSV that are not skill scores (an iteration/row
+# index), so they're excluded from the box-plot stats. Everything else in the
+# header is treated as a score and gets a median + box stats — so the endpoint
+# auto-covers whatever scores fimeval writes (Dipsikha, 2026-09-08) without a
+# code change when the score set grows.
+_BOOTSTRAP_NON_SCORE_COLS = {'iteration', 'index', 'sample', ''}
+
+
+def _bootstrap_score_columns(fieldnames):
+    """Score columns from a sampling-CSV header: every column that isn't an
+    iteration/index column (case-insensitive; also drops pandas' unnamed index).
+    Original names are preserved for row lookup; CSV order is preserved."""
+    cols = []
+    for name in fieldnames or []:
+        key = (name or '').strip().lower()
+        if key in _BOOTSTRAP_NON_SCORE_COLS or key.startswith('unnamed'):
+            continue
+        cols.append(name)
+    return cols
 
 # fimeval writes each bootstrap sampling approach to its own dir + filename stem
 # (FE50 — the endpoint used to hard-code only Random_Sampling/random_, so
@@ -1208,11 +1226,14 @@ def api_job_bootstrap(request, job_id):
 
         candidates = []
         stats = {}
+        metric_order = []  # score columns that had data, in first-seen CSV order
         for name, key in matched:
             raw = storage.get_object(key)['Body'].read().decode('utf-8', errors='replace')
-            series = {m: [] for m in BOOTSTRAP_METRICS}
-            for row in csv.DictReader(io.StringIO(raw)):
-                for m in BOOTSTRAP_METRICS:
+            reader = csv.DictReader(io.StringIO(raw))
+            cols = _bootstrap_score_columns(reader.fieldnames)
+            series = {m: [] for m in cols}
+            for row in reader:
+                for m in cols:
                     try:
                         v = float(row[m])
                     except (TypeError, ValueError, KeyError):
@@ -1220,7 +1241,11 @@ def api_job_bootstrap(request, job_id):
                     if math.isfinite(v):
                         series[m].append(v)
             candidates.append(name)
-            stats[name] = {m: _box_stats(vals) for m, vals in series.items() if vals}
+            cand_stats = {m: _box_stats(vals) for m, vals in series.items() if vals}
+            stats[name] = cand_stats
+            for m in cols:
+                if m in cand_stats and m not in metric_order:
+                    metric_order.append(m)
     except (ClientError, BotoCoreError) as exc:
         logger.error('S3 bootstrap fetch failed for job %s: %s', job_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
@@ -1228,6 +1253,6 @@ def api_job_bootstrap(request, job_id):
     return JsonResponse({
         'job_id': job.id,
         'candidates': candidates,
-        'metrics': BOOTSTRAP_METRICS,
+        'metrics': metric_order,
         'stats': stats,
     })

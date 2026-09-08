@@ -1511,6 +1511,40 @@ class TestBootstrapEndpoint(TethysTestCase):
         self.assertEqual(csi['outliers'], [])
         self.assertEqual(csi['n'], 5)
 
+    # Dipsikha (2026-09-08): the sampling CSV now carries more scores; compute
+    # medians/box stats for EVERY score column, not a fixed subset. The index
+    # column (iteration) must be excluded.
+    ALL_SCORES_CSV = (
+        'FN,TN,CSI,POD,Accuracy,FNR,Precision,Sensitivity,F1,MCC,Kappa,iteration\n'
+        '10,90,0.1,0.5,0.9,0.2,0.6,0.5,0.5,0.4,0.4,1\n'
+        '20,80,0.2,0.5,0.9,0.2,0.6,0.5,0.5,0.4,0.4,2\n'
+        '30,70,0.3,0.5,0.9,0.2,0.6,0.5,0.5,0.4,0.4,3\n'
+        '40,60,0.4,0.5,0.9,0.2,0.6,0.5,0.5,0.4,0.4,4\n'
+        '50,50,0.5,0.5,0.9,0.2,0.6,0.5,0.5,0.4,0.4,5\n'
+    )
+
+    def test_computes_median_for_all_csv_scores(self):
+        job = self._make_job()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage',
+                   return_value=self._storage(csv_text=self.ALL_SCORES_CSV)):
+            MockDJ.objects.get.return_value = job
+            response = self._get(92)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        # Every score column, in CSV order; the iteration index column excluded.
+        self.assertEqual(
+            body['metrics'],
+            ['FN', 'TN', 'CSI', 'POD', 'Accuracy', 'FNR', 'Precision', 'Sensitivity', 'F1', 'MCC', 'Kappa'],
+        )
+        self.assertNotIn('iteration', body['metrics'])
+        st = body['stats']['candidate_0']
+        self.assertAlmostEqual(st['Precision']['median'], 0.6)
+        self.assertAlmostEqual(st['Sensitivity']['median'], 0.5)
+        self.assertAlmostEqual(st['FNR']['median'], 0.2)
+        self.assertAlmostEqual(st['FN']['median'], 30)   # raw counts get medians too
+        self.assertAlmostEqual(st['CSI']['median'], 0.3)
+
     def test_returns_box_stats_for_stratified(self):
         # FE50: box plots must work for stratified sampling, not just random.
         key = 'outputs/1/uid1/case_study/bootstrap/Stratified_Sampling/stratified_candidate_0.csv'
