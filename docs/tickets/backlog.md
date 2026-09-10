@@ -51,18 +51,18 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
 | FE36 | not started (was FE18) | ~2 d |
-| BE36 | not started | ~1 d |
-| BE37 | not started | ~1.5 d |
-| BE38 | not started | ~0.25 d |
+| BE36 | ✅ done (PR #14) | ~1 d |
+| BE37 | ✅ done (PR #14) | ~1.5 d |
+| BE38 | ✅ done (PR #14) | ~0.25 d |
 | BE39 | not started | ~3–4 d |
-| FE37 | not started | ~2 d |
+| FE37 | ✅ done (PR #14) | ~2 d |
 | FE38 | blocked (scope TBD) | ~0.5–1 d |
 | FE39 | not started | ~0.5 d |
-| FE40 | not started | ~1 d |
-| FE41 | not started | ~1 d |
+| FE40 | ✅ done (PR #14) | ~1 d |
+| FE41 | ✅ done (PR #14) | ~1 d |
 | FE42 | not started | ~2–3 d |
 | FE43 | not started | ~1–2 d |
-| FE44 | not started | ~1 d |
+| FE44 | ✅ done (PR #14) | ~1 d |
 | FE45 | not started | ~1–1.5 d |
 | FE46 | not started | ~2–3 d |
 | BE40 | not started | ~1 d |
@@ -75,15 +75,20 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE49 | ✅ done | ~2–3 d |
 | FE50 | ✅ done | ~0.5 d |
 | FE51 | ✅ done | ~1.5–2 d |
-| FE52 | not started | ~0.5 d |
+| FE52 | ✅ done (PR #16) | ~0.5 d |
 | BE45 | ~~struck~~ (Giovanni owns) | — |
-| FE53 | not started | ~0.5 d |
+| FE53 | ✅ done (PR #15) | ~0.5 d |
 | FE54 | ✅ done (via PR #15) | ~0.5–1 d |
-| FE55 | not started | ~1 d |
+| FE55 | 🔄 in review (PR #19) | ~1 d |
 
-**Remaining, worst-case:** Workspace overhaul (FE27–FE32, BE34 done) ≈ **~13.5 d**;
-BE26 ~2 d; FE25 + its backend storage-layout ~3–4 d. Overhaul's biggest uncertainty
-is the FE27 router migration and FE31's ECharts→PNG export.
+**Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
+~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
+and FE25 + its backend storage-layout (~3–4 d). Most other open tickets are ≤1–2 d
+each. (FE47 in progress; FE55 in review as PR #19; BE46 in review as PR #18.)
+
+> Status column reconciled 2026-09-10 — several rows still marked "not started" had
+> shipped in PR #14/#15/#16. Estimates are legacy dev-days; new estimates are given
+> in hours per current convention.
 
 ---
 
