@@ -7,6 +7,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeSlug from 'rehype-slug';
 import rawDoc from './docs/fimeval.md?raw';
 import rawWebapp from './docs/webapp.md?raw';
@@ -14,6 +15,22 @@ import './Docs.css';
 
 // Where the repo's local Images/ were copied (served by Tethys like the chrome).
 const IMG_BASE = '/static/fimeval_gui/images/docs/';
+
+// Sanitize the raw HTML that rehype-raw parses out of the (now upstream-synced)
+// README, while keeping the presentational markup the docs actually use: the
+// centered <div>/<img>, image width/align, and the decorative <hr> rules under
+// headings. Runs after rehype-raw (so there's parsed HTML to clean) and before
+// rehype-slug (so the heading ids added afterwards aren't stripped).
+const docsSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'div'],
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [...(defaultSchema.attributes?.div ?? []), 'align'],
+    img: [...(defaultSchema.attributes?.img ?? []), 'width', 'height', 'align'],
+    hr: [...(defaultSchema.attributes?.hr ?? []), 'style'],
+  },
+};
 
 // Heading slug matching rehype-slug (github-slugger): lowercase, drop anything
 // that isn't a word char / space / hyphen, then one hyphen per whitespace char
@@ -92,7 +109,7 @@ export default function Docs() {
       <article className="docs-body">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeRaw, rehypeSlug]}
+          rehypePlugins={[rehypeRaw, [rehypeSanitize, docsSchema], rehypeSlug]}
         >
           {md}
         </ReactMarkdown>
