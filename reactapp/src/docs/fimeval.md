@@ -22,55 +22,6 @@ The accuracy of the flood inundation mapping (FIM) is critical for model develop
 
 To address these issues, we developed Flood Inundation Mapping Prediction Evaluation Framework (FIMeval), a Python-based FIM evaluation framework capable of automatically evaluating flood maps from different sources. FIMeval takes the advantage of comparing multiple target datasets with large benchmark datasets. It includes an option to incorporate permanent waterbodies as non-flood pixels with a user input file or pre-set dataset. In addition to traditional evaluation metrics, it can also compare the number of buildings inundated using a user input file or a pre-set dataset.
 
-
-
-### Repository structure
-<hr style="border: 1px solid black; margin: 0;">  
-
-The architecture of the ```fimeval``` integrates different modules to which helps the automation of flood evaluation. All those modules codes are in source (```src``` ) folder.
-```bash
-fimeval/     
-├── docs/                        # Documentation notebooks and sample data
-│   ├── sampledata/              # Sample rasters used to demonstrate the framework
-│   ├── fimeval_usage.ipynb      # Example workflow for the evaluation framework
-│   └── fimbench_usage.ipynb     # Example workflow for querying benchmark FIM data
-├── Images/                      # Images used in the documentation
-├── tests/                       # Test cases for framework functionality
-│   ├── test_accessbenchmarkFIM.py
-│   └── test_evaluationfim.py
-├── src/
-│   └── fimeval/    
-│       ├── BenchFIMQuery/               # Query benchmark FIM datasets from the catalog
-│       │   ├── access_benchfim.py
-│       │   └── utilis.py
-│       ├── bootstrap/                   # Bootstrap-based evaluation utilities and sampling methods
-│       │   ├── methods.py
-│       │   ├── run_bootstrap.py
-│       │   └── utils.py
-│       ├── BuildingFootprint/           # Building-footprint-based evaluation modules
-│       │   ├── arcgis_API.py
-│       │   └── evaluationwithBF.py
-│       ├── ContingencyMap/              # Core raster evaluation, metrics, and plotting modules
-│       │   ├── evaluationFIM.py
-│       │   ├── methods.py
-│       │   ├── metrics.py
-│       │   ├── plotevaluationmetrics.py
-│       │   ├── printcontingency.py
-│       │   └── water_bodies.py
-│       ├── __init__.py
-│       ├── setup_benchFIM.py
-│       └── utilis.py                    # Utilities for reprojection and resampling
-├── LICENSE.txt
-├── pyproject.toml
-└── uv.lock
-```
-The graphical representation of fimeval pipeline can be summarized as follows in **```Figure 1```**. Here, it will show all the steps incorporated within the ```fimeval``` during packaging and all functionality are interconnected to each other, resulting the automation of the framework.
-
-<div align="center">
-  <img width="800" alt="image" src="./Images/flowchart.jpg">
-</div>
-Figure 1: Flowchart showing the entire framework pipeline.
-
 ### Framework Installation and Usage
 <hr style="border: 1px solid black; margin: 0;">  
 
@@ -92,22 +43,6 @@ import fimeval as fp
 ```
 **Note: The framework usage provided in detailed in [Here (docs/fimeval_usage.ipynb)](./docs/fimeval_usage.ipynb)**. It has detail documentation from installation, setup, running- until results.
 
-### Main Directory Structure
-<hr style="border: 1px solid black; margin: 0;">  
-
-The main directory contains the primary folder for storing the  case studies. If there is one case study, user can directly pass the case study folder as the main directory. Each case study folder must include a Benchmark FIM (B-FIM)  with a 'benchmark' word  assigned within the B-FIM file and different Model Predicted FIM (M-FIM)
-in tif format. 
-For mutilple case studies,the main directory could be structure in such a way that contain the seperate folders for individual case studies.For example, if a user has two case studies they should create two seperate folders as shown in the Figure below.
-<div align="center">
-  <img width="350" alt="image" src="./Images/directorystructure.png">
-</div>
-Figure 2: Main directory structure for one and multiple case study.
-
-This directory can be defined as follows while running framework.
-```bash
-main_dir = Path('./path/to/main/dir')
-```
-
 #### **Permanent Water Bodies (PWB)**
 This framework uses PWB to first to delineate the PWB in the FIM and assign into different class so that the evaluation will be more fair. For the Contiguous United States (CONUS), the PWB is already integrated within the framework however, if user have more accurate PWB or using fimeval for outside US they can initialize and use PWB within fimeval framework. Currently it is using PWB publicly hosted by ESRI through REST API: https://hub.arcgis.com/datasets/esri::usa-detailed-water-bodies/about
 
@@ -122,8 +57,11 @@ PWD_dir = Path('./path/to/PWB/vector/file')
 2. **```convex_hull```**  
    Another provision of determining flood extent is the generation of the minimum bounding polygon along the valid shapes. The framework will select the smallest raster extent followed by the generation of the valid vector shapes from the raster. It will then generate the convex hull (minimum bounding polygon along the valid shapes).
 
-3. **```AOI```**  
-   User can give input  an already pre-defined flood extent vector file. This method will only be valid if user is working with their own evaluation boundary, 
+3. **```intersected_extent```**  
+   This method defines the evaluation extent as the common intersected area of the benchmark FIM (B-FIM) and all the model FIMs (M-FIMs) - i.e. the valid-data footprint of each raster is computed    independently and then intersected together, so only the area with valid data in every raster is kept.
+   
+4. **```AOI```**  
+   User can give input  an already pre-defined flood extent vector file. This method will only be valid if user is working with their own evaluation boundary. 
 
 Depending upon user preference, they need to pass those method name as a argument while running the evaluation.
 
@@ -151,62 +89,71 @@ The complete description of different modules, what they are meant for, argument
 Table 1: Modules in `fimeval` are in order of execution.
 | Module Name | Objective | Arguments | Outputs |
 |------------|-----------|-----------|-----------|
-| `EvaluateFIM` | Runs the core raster-based evaluation between the benchmark FIM (B-FIM) and one or more model FIMs (M-FIMs). | `main_dir`: Main directory containing one or more case-study folders.<br>`method_name`: Evaluation extent method (`smallest_extent`, `convex_hull`, `AOI`, `intersected_extent`, or `bootstrap`).<br>`output_dir`: Output directory where results and intermediate files are saved.<br>*`PWB_dir`*: Optional permanent water bodies vector file supplied by the user.<br>*`shapefile_dir`*: Optional AOI boundary file for `AOI`-based evaluation.<br>*`target_crs`*: Target projected CRS in EPSG format.<br>*`target_resolution`*: Target raster resolution for harmonizing benchmark and candidate rasters.<br>*`sub_method`*: Bootstrap sampling method (`random`, `systematic`, or `stratified`) when `method_name="bootstrap"`.<br>*`n_iterations`*, *`n_points`*, *`spacing_range`*, *`seed`*, *`save_points`*, *`save_every`*, *`plot_metrics`*: Optional bootstrap controls. | Saves evaluation outputs in the case-study output folder, including `BoundaryforEvaluation/`, `MaskedFIMwithBoundary/`, `ContingencyMaps/`, and `EvaluationMetrics/`. For bootstrap runs, additional outputs are written under `Random_Sampling/`, `Systematic_Sampling/`, or `Stratified_Sampling/`, with sampled-point shapefiles organized under `Sampled_Points/iter_###/`. |
+| `EvaluateFIM` | Runs the core raster-based evaluation between the benchmark FIM (B-FIM) and one or more model FIMs (M-FIMs). | `main_dir`: Main directory containing one or more case-study folders.<br>`method_name`: Evaluation extent method (`smallest_extent`, `convex_hull`, `intersected_extent`, `AOI`, or `bootstrap`).<br>`output_dir`: Output directory where results and intermediate files are saved.<br>*`PWB_dir`*: Optional permanent water bodies vector file supplied by the user.<br>*`shapefile_dir`*: Optional AOI boundary file for `AOI`-based evaluation.<br>*`target_crs`*: Target projected CRS in EPSG format.<br>*`target_resolution`*: Target raster resolution for harmonizing benchmark and candidate rasters. | Saves evaluation outputs in the case-study output folder, including `BoundaryforEvaluation/`, `MaskedFIMwithBoundary/`, `ContingencyMaps/`, and `EvaluationMetrics/`. |
+| `EvaluateFIM` (`method_name="bootstrap"`) | Repeats the evaluation over many randomly (or systematically) drawn samples of points instead of computing metrics on every pixel once, producing a distribution of each metric (CSI, F1, POD, MCC, Kappa, Accuracy, FAR) across iterations. | `sub_method`: Sampling strategy (`random`, `systematic`, or `stratified`).<br>*`extent_method`*: Evaluation extent to sample points from (`smallest_extent`, `convex_hull`, `AOI`, or `intersected_extent`, default).<br>*`shapefile_dir`*: Required if `extent_method="AOI"`.<br>*`n_iterations`*: Number of bootstrap iterations (default `100`).<br>*`n_points`*: Points drawn per iteration for `random`/`stratified` (default `500`).<br>*`spacing_range`*: `(min, max)` grid spacing, required for `systematic`.<br>*`seed`*: Random seed for reproducible sampling.<br>*`save_points`*, *`save_every`*: Whether to save sampled-point shapefiles, and how often.<br>*`plot_metrics`*: Whether to plot metric-distribution boxplots. See [Bootstrap-Based Evaluation](#bootstrap-based-evaluation) for full details. | Writes a metrics CSV (one row per iteration) under `Random_Sampling/`, `Systematic_Sampling/`, or `Stratified_Sampling/` (matching `sub_method`), plus a boxplot PNG if `plot_metrics=True`. If `save_points=True`, sampled-point shapefiles are also saved under `Sampled_Points/iter_###/`. |
 | `PrintContingencyMap` | Prints the contingency maps created by `EvaluateFIM` for quick visual inspection. | `main_dir`, `method_name`, `output_dir`: Used to dynamically locate the contingency rasters produced during evaluation. | Saves a styled PNG version of each contingency raster showing evaluation classes such as true positive, false positive, false negative, true negative, no data, and permanent water bodies. The outputs look like Figure 4 first row. |
 | `PlotEvaluationMetrics` | Plots bar charts of the evaluation metrics produced by `EvaluateFIM`. | `main_dir`, `method_name`, `output_dir`: Used to dynamically locate the `EvaluationMetrics.csv` file generated for each case study. | Saves bar plots of the main performance metrics calculated during evaluation. The outputs look like Figure 4 second row. |
 | `EvaluationWithBuildingFootprint` | Evaluates benchmark and model FIM agreement at building locations. By default it uses the Microsoft Building Footprint dataset through the ArcGIS REST API, but users can also provide their own building-footprint file. | `main_dir`, `method_name`, `output_dir`: Same core inputs used by the other modules.<br>*`building_footprint`*: Optional user-supplied building footprint in `.shp` or `.gpkg` format.<br>*`shapefile_dir`*: Optional AOI boundary when using a user-defined evaluation area. | Calculates building-based agreement metrics (for example TP, FP, CSI, F1, and Accuracy), saves the results as CSV files in `output_dir`, and generates plots summarizing inundated-building counts across benchmark and model FIMs. |
 
+##### Bootstrap-Based Evaluation
+
+When `method_name = "bootstrap"`, `EvaluateFIM` repeats the evaluation over many randomly (or systematically) drawn samples of points instead of computing metrics on every pixel once, producing a distribution of each metric (CSI, F1, POD, MCC, Kappa, Accuracy, FAR) across iterations. Three sampling strategies are available via `sub_method`, and the polygon they draw points from is chosen independently via `extent_method`.
+
+**Sampling strategies (`sub_method`)**
+1. **`random`** — Points are drawn uniformly at random within the evaluation extent, re-drawn each iteration.
+2. **`systematic`** — Points are placed on a regular fishnet grid inside the evaluation extent; the grid spacing is randomly re-drawn each iteration from `spacing_range`.
+3. **`stratified`** — Points are drawn from the benchmark raster's flooded / non-flooded classes with a 50/50 split, so both classes are represented in every iteration.
+
+**Bootstrap parameters**
+| Parameter | Type / Default | Applies to | Description |
+|---|---|---|---|
+| `sub_method` | str, required | all | Sampling strategy: `"random"`, `"systematic"`, or `"stratified"`. |
+| `extent_method` | str, default `"intersected_extent"` | all | Evaluation extent to sample points from: `"smallest_extent"`, `"convex_hull"`, `"AOI"`, or `"intersected_extent"`. See [Methods for Extracting Flood Extents](#methods-for-extracting-flood-extents). |
+| `shapefile_dir` | path, required if `extent_method="AOI"` | all | AOI boundary vector file, same as for the standalone `AOI` method. |
+| `n_iterations` | int, default `100` | all | Number of bootstrap iterations to run. |
+| `n_points` | int, default `500` | `random`, `stratified` | Number of sample points drawn per iteration. |
+| `spacing_range` | tuple `(min, max)`, required for `systematic` | `systematic` | Grid spacing range in the raster's map units, e.g. `(100, 1000)`; a new spacing is randomly drawn from this range each iteration. |
+| `seed` | int, optional | all | Random seed for reproducible sampling. |
+| `save_points` | bool, default `False` | all | Whether to save the sampled points of each saved iteration as shapefiles. |
+| `save_every` | int, default `1` | all | Save sampled-point shapefiles every N iterations (only used when `save_points=True`). |
+| `plot_metrics` | bool, default `False` | all | Whether to generate boxplots of the metric distributions across iterations. |
+
+**Example**
+```bash
+method_name = "bootstrap"
+sub_method = "random"                  # "random" | "systematic" | "stratified"
+
+fe.EvaluateFIM(
+    Main_dir,
+    method_name,
+    output_dir,
+    benchmark_dict=benchmark_dict,
+    target_crs=target_crs,
+    target_resolution=target_resolution,
+    sub_method=sub_method,
+    extent_method=extent_method,
+    n_iterations=100,
+    n_points=500,
+    spacing_range=None,     # e.g. (100, 1000), required when sub_method="systematic"
+    seed=42,
+    save_points=True,
+    save_every=5,
+    plot_metrics=True,
+)
+```
+
+**Outputs**
+For each candidate FIM, bootstrap writes its results under a folder matching `sub_method` — `Random_Sampling/`, `Systematic_Sampling/`, or `Stratified_Sampling/` — containing a metrics CSV (one row per iteration) and, if `plot_metrics=True`, a boxplot PNG of the metric distributions. If `save_points=True`, the sampled points themselves are also saved as shapefiles under `Sampled_Points/iter_###/`, once every `save_every` iterations.
 <p align="center">
   <img src="./Images/methodsresults_combined.jpg" width="750" />
 </p>
 
 Figure 4: Combined raw output from framework for different two method. First row (subplot a and b) and second row (subplot c and d) is contingency maps and evaluation metrics of FIM derived using `PrintContingencyMaP` and `PlotEvaluationMetrics` module. Third row (subplot e and f) is the output after processing and calculating of evaluation with BF by unsing `EvaluateWithBuildingFoorprint` module.
 
-## Installation Instructions
-<hr style="border: 1px solid black; margin: 0;">  
-
-#### 1. Prerequisites
-
-Before installing `fimeval`, ensure the following software are installed:
-
-- **Python**: Version 3.10 or higher  
-- **Anaconda**: For managing environments and dependencies  
-- **GIS Software**: For Visulalisation
-  - [ArcGIS](https://www.esri.com/en-us/arcgis/products/index) or [QGIS](https://qgis.org/en/site/)
-- **Optional**:
-  - [Google Earth Engine](https://earthengine.google.com/) account
-  - Java Runtime Environment (for using GEE API)
-
----
-
-#### 2. Install Anaconda
-
-If Anaconda is not installed, download and install it from the [official website](https://www.anaconda.com/products/distribution).
-
----
-
-#### 3. Set Up Virtual Environment
-
-#### For Mac Users
-
-Open **Terminal** and run:
-```bash
-# Create a new environment named 'fimeval'
-conda create --name fimeval python=3.10
-
-# Activate the environment
-conda activate fimeval
-
-# Install fimeval package
-pip install uv
-uv pip install fimeval
-```
-
 ### Desktop Application (GUI Version)
 <hr style="border: 1px solid black; margin: 0;">  
 
 For users who prefer not to write Python code, `fimeval` is also distributed as a standalone desktop application for **macOS** and **Windows**. The GUI bundles the same modules described in **Table 1**.
-
 
 #### 1. Download
 
@@ -230,7 +177,6 @@ FIMeval_Executables/
 ```
 
 Download the folder for your operating system plus the `Test_data` folder.
-
 
 #### 2. Run an Evaluation
 
@@ -294,10 +240,3 @@ pip install fimeval
 | | |
 | --- | --- |
 | ![alt text](https://ciroh.ua.edu/wp-content/uploads/2022/08/CIROHLogo_200x200.png) | Funding for this project was provided by the National Oceanic & Atmospheric Administration (NOAA), awarded to the Cooperative Institute for Research to Operations in Hydrology (CIROH) through the NOAA Cooperative Agreement with The University of Alabama.
-
-### For More Information
-
-Contact <a href="https://geography.ua.edu/people/sagy-cohen/" target="_blank">Sagy Cohen</a>
- (sagy.cohen@ua.edu)
- Supath Dhital, (sdhital@crimson.ua.edu)
- Dipsikha Devi, (ddevi@ua.edu)
