@@ -200,6 +200,25 @@ tethysapp-fimeval-gui/
 
 ---
 
+## In-app documentation (`/docs`)
+
+The `/docs` page is bundled markdown (so it renders offline):
+
+- **`reactapp/src/docs/fimeval.md`** — synced from the upstream `sdmlua/fimeval`
+  README. Repo-only sections (repository structure, installation, etc.) are
+  stripped at sync time; keep it in sync, don't hand-edit it.
+- **`reactapp/src/docs/webapp.md`** — static, web-app-specific sections (FAQs,
+  Contact & Attribution). Edit this by hand.
+
+Refresh the synced doc with `cd reactapp && npm run sync-docs` (pulls the README
++ images from `sdmlua/fimeval@main`; override the ref with `FIMEVAL_DOCS_REF`).
+The `.github/workflows/sync-docs.yml` workflow does this weekly and opens a PR
+only when the docs changed — this needs the repo setting **Settings → Actions →
+General → "Allow GitHub Actions to create and approve pull requests"** enabled.
+Raw HTML in the synced README is sanitized before rendering (`rehype-sanitize`).
+
+---
+
 ## Roadmap
 
 Upcoming work, in rough priority order:

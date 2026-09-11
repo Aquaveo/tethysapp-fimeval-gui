@@ -1,0 +1,52 @@
+name: Sync in-app docs from upstream
+
+# Weekly poll of the upstream FIMeval docs (sdmlua/fimeval). Runs the same
+# reactapp/scripts/sync-docs.mjs used locally; if the bundled docs changed, opens
+# a PR with the refresh (and nothing otherwise). Manual runs via the Actions tab.
+#
+# Prerequisite: repo Settings -> Actions -> General -> "Allow GitHub Actions to
+# create and approve pull requests" must be enabled, or the PR step 403s.
+on:
+  schedule:
+    - cron: '0 6 * * 1'      # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Zero-dep script (built-in fetch) — no npm install needed. The token just
+      # raises the GitHub API rate limit for the Images/ listing.
+      - name: Pull latest docs from sdmlua/fimeval
+        run: node reactapp/scripts/sync-docs.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only opens a PR when the scoped paths actually changed; otherwise a no-op.
+      - name: Open a PR if the docs changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: 'docs: sync in-app FIMeval docs from upstream'
+          title: 'docs: sync in-app FIMeval docs from sdmlua/fimeval'
+          body: |
+            Automated weekly sync of the bundled in-app docs (README + images) from
+            `sdmlua/fimeval@main`, via `reactapp/scripts/sync-docs.mjs`.
+
+            Repo-only sections are stripped at sync time; the static web-app
+            sections (`reactapp/src/docs/webapp.md`) are never touched. Review the
+            changes and merge if they look right.
+          branch: chore/docs-sync
+          delete-branch: true
+          add-paths: |
+            reactapp/src/docs/fimeval.md
+            tethysapp/fimeval_gui/public/images/docs
