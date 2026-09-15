@@ -80,6 +80,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE53 | ✅ done (PR #15) | ~0.5 d |
 | FE54 | ✅ done (via PR #15) | ~0.5–1 d |
 | FE55 | ✅ done (PR #19) | ~1 d |
+| FE56 | not started | ~3 h |
 
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
@@ -1114,3 +1115,23 @@ Out of Scope
 
 Notes: 2026-08-27 demo ("docs auto-pulled from GitHub"). Follow-up to FE49 (a one-time
 import). Lower priority. Est: ~1 d.
+
+### FIMEVAL-FE56 — Display the run owner's username in the Runs list
+
+Description: Runs should be attributable to a user at a glance (raised re: shared accounts /
+tracking individual runs — the "82 runs per account" discussion). Show the owning user's name
+on each run in the Runs list. Runs are already per-user, so this labels each run with the
+current user's name.
+
+[  ]  `GET api/jobs` (BE34) returns the owning user's username per run
+[  ]  The Runs list shows the username on each run (or a single "Runs — <username>" header)
+[  ]  Accessible, screen-reader-friendly label
+
+Out of Scope
+- An all-users / admin view of other users' runs (would require relaxing BE34's per-user
+  filter — separate ticket if the team wants it)
+- FIMsim's equivalent (tracked separately in the FIM-ecosystem notes)
+
+Notes: 2026-09-10 meeting (Reshma). Scope (a) — own-username label only — confirmed by Reshma
+2026-09-15; number FE56 pulled from the tracker. Applies to FIMsim too (handled separately).
+Est: ~3 h.
