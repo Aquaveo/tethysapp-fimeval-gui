@@ -5,6 +5,7 @@
 // reopened from the nav's "Guidelines" link. Accessible: role=dialog, focus trap,
 // Escape/backdrop close, focus restored to the trigger on close.
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import './WelcomeModal.css';
 
 type Props = {
@@ -121,6 +122,12 @@ export default function WelcomeModal({ open, onClose, dontShow, onDontShowChange
               <code>.dbf</code>, <code>.prj</code>…).
             </li>
           </ul>
+
+          <div className="wk-welcome-docs" role="note">
+            New to FIMeval? Read the{' '}
+            <Link to="/docs" onClick={onClose}>documentation</Link> for a walkthrough of the
+            evaluation methods, inputs, and FAQs.
+          </div>
 
           <div className="wk-welcome-actions">
             <label className="wk-welcome-check">
