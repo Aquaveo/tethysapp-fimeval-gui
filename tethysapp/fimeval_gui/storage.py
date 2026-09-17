@@ -4,6 +4,8 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
+S3_KEY_PREFIX = 'fimeval/'
+
 
 class S3Storage:
     """Thin boto3 wrapper over a single S3/MinIO bucket.

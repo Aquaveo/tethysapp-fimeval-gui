@@ -13,7 +13,6 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgdal-dev gdal-bin g++ \
     && rm -rf /var/lib/apt/lists/*
-USER 1000:1000
 
 COPY requirements/overrides.txt ${TETHYS_HOME}/overrides.txt
 COPY . ${TETHYS_HOME}/apps/tethysapp-fimeval-gui
