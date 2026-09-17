@@ -15,11 +15,13 @@ class S3Storage:
     def __init__(self, endpoint_url, access_key, secret_key, bucket,
                  public_endpoint_url=None):
         self._bucket = bucket
+        _keys = {}
+        if access_key and secret_key:
+            _keys = {'aws_access_key_id': access_key, 'aws_secret_access_key': secret_key}
         self._client = boto3.client(
             's3',
             endpoint_url=endpoint_url or None,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
+            **_keys,
         )
         # Presigned URLs are handed to the browser, so the presign client is
         # configured deliberately, independent of the main client:
@@ -34,10 +36,9 @@ class S3Storage:
         self._presign_client = boto3.client(
             's3',
             endpoint_url=(public_endpoint_url or endpoint_url) or None,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
             region_name='us-east-1',
             config=Config(signature_version='s3v4'),
+            **_keys,
         )
 
     def upload_bytes(self, data: bytes, key: str) -> str:
