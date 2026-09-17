@@ -48,13 +48,5 @@ portalConfig:
         OIDC_ENABLED: true
         PKCE_REQUIRED: true
 
-dask:
-  enabled: true
-  worker:
-    nodeSelector:
-      karpenter.sh/capacity-type: spot
-    env:
-      FIMEVAL_TARGET_CRS: EPSG:5070
-
 pdb:
   enabled: true

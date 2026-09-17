@@ -19,6 +19,12 @@ helm install fimeval \
   -f deploy/values-fimeval.yaml
 ```
 
+The `tethys-app` chart deploys only the app. FIMeval's compute runs on Dask, which this app owns: once the release is up, apply the cluster (it reuses the app's `fimeval-dask` service account for IRSA).
+
+```bash
+kubectl apply -f deploy/kubernetes/dask-cluster.yaml
+```
+
 ## Post-deploy Tethys settings
 
 Set once (admin or provision hook), since these are app settings, not chart values:

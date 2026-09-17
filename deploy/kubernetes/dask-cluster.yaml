@@ -1,0 +1,80 @@
+apiVersion: kubernetes.dask.org/v1
+kind: DaskCluster
+metadata:
+  name: fimeval-dask
+  namespace: fimeval
+spec:
+  scheduler:
+    service:
+      type: ClusterIP
+      selector:
+        dask.org/cluster-name: fimeval-dask
+        dask.org/component: scheduler
+      ports:
+        - name: tcp-comm
+          port: 8786
+          targetPort: tcp-comm
+          protocol: TCP
+        - name: http-dashboard
+          port: 8787
+          targetPort: http-dashboard
+          protocol: TCP
+    spec:
+      serviceAccountName: fimeval-dask
+      containers:
+        - name: scheduler
+          image: gioelkin/tethysapp-fimeval-gui:latest
+          imagePullPolicy: Always
+          args: ["/opt/conda/envs/tethys/bin/dask-scheduler"]
+          ports:
+            - name: tcp-comm
+              containerPort: 8786
+            - name: http-dashboard
+              containerPort: 8787
+          readinessProbe:
+            tcpSocket:
+              port: tcp-comm
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { memory: 2Gi }
+  worker:
+    replicas: 0
+    spec:
+      serviceAccountName: fimeval-dask
+      nodeSelector:
+        karpenter.sh/capacity-type: spot
+      containers:
+        - name: worker
+          image: gioelkin/tethysapp-fimeval-gui:latest
+          imagePullPolicy: Always
+          args:
+            - /opt/conda/envs/tethys/bin/dask-worker
+            - tcp://fimeval-dask-scheduler.fimeval.svc.cluster.local:8786
+            - --name=$(DASK_WORKER_NAME)
+            - --nthreads=2
+            - --memory-limit=12GiB
+            - --local-directory=/scratch
+          env:
+            - name: FIMEVAL_TARGET_CRS
+              value: "EPSG:5070"
+          volumeMounts:
+            - name: scratch
+              mountPath: /scratch
+          resources:
+            requests: { cpu: '2', memory: 12Gi, ephemeral-storage: 20Gi }
+            limits: { memory: 14Gi, ephemeral-storage: 40Gi }
+      volumes:
+        - name: scratch
+          emptyDir: {}
+---
+apiVersion: kubernetes.dask.org/v1
+kind: DaskAutoscaler
+metadata:
+  name: fimeval-dask
+  namespace: fimeval
+spec:
+  cluster: fimeval-dask
+  minimum: 0
+  maximum: 4
