@@ -4,15 +4,15 @@
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::456531024327:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/BD2A00B853EACE4882C567205BA57F30"
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/<OIDC_PROVIDER>"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "oidc.eks.us-east-1.amazonaws.com/id/BD2A00B853EACE4882C567205BA57F30:aud": "sts.amazonaws.com"
+          "<OIDC_PROVIDER>:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "oidc.eks.us-east-1.amazonaws.com/id/BD2A00B853EACE4882C567205BA57F30:sub": "system:serviceaccount:fimeval:fimeval-*"
+          "<OIDC_PROVIDER>:sub": "system:serviceaccount:<NAMESPACE>:fimeval-*"
         }
       }
     }
