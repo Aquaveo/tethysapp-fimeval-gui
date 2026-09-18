@@ -25,7 +25,9 @@ spec:
         - name: scheduler
           image: {{ include "fimeval.daskImage" . | quote }}
           imagePullPolicy: {{ (index .Values "tethys-app").image.pullPolicy }}
-          args: [{{ .Values.dask.scheduler.command | quote }}]
+          args:
+            - {{ .Values.dask.binary | quote }}
+            - scheduler
           ports:
             - name: tcp-comm
               containerPort: 8786
@@ -51,7 +53,8 @@ spec:
           image: {{ include "fimeval.daskImage" . | quote }}
           imagePullPolicy: {{ (index .Values "tethys-app").image.pullPolicy }}
           args:
-            - {{ .Values.dask.worker.command | quote }}
+            - {{ .Values.dask.binary | quote }}
+            - worker
             - {{ include "fimeval.daskSchedulerAddress" . | quote }}
             - --name=$(DASK_WORKER_NAME)
             - --nthreads={{ .Values.dask.worker.nthreads }}

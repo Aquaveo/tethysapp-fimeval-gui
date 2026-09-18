@@ -46,16 +46,16 @@ tethys-app:
 dask:
   enabled: true
   serviceAccountName: fimeval-dask
+  # unified dask CLI; scheduler/worker are subcommands
+  binary: /opt/conda/envs/tethys/bin/dask
   image:
     repository: ''
     tag: ''
   scheduler:
-    command: /opt/conda/envs/tethys/bin/dask-scheduler
     resources:
       requests: { cpu: 500m, memory: 1Gi }
       limits: { memory: 2Gi }
   worker:
-    command: /opt/conda/envs/tethys/bin/dask-worker
     nthreads: 2
     memoryLimit: 12GiB
     nodeSelector: {}
