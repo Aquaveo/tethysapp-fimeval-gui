@@ -14,7 +14,7 @@ Single-app Tethys instance deployed with the generic
 
 ```bash
 helm install fimeval \
-  <path-to>/tethysapp-helm-library/charts/tethys-app \
+  oci://ghcr.io/aquaveo/charts/tethys-app --version 0.1.0 \
   -n fimeval --create-namespace \
   -f deploy/values-fimeval.yaml
 ```
