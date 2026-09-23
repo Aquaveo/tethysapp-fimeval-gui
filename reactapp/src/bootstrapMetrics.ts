@@ -8,6 +8,17 @@ import type { BootstrapStats } from './api';
 const METRIC_ALIASES: Record<string, string> = {
   acc: 'accuracy',
   accuracy: 'accuracy',
+  // Whole-domain "Prec" vs bootstrap "Precision".
+  prec: 'precision',
+  precision: 'precision',
+  // TPR = POD = Recall = Sensitivity are the same metric under different names
+  // across the whole-domain table and the bootstrap CSV — collapse them to one
+  // canonical so the median lines up whichever name each file uses.
+  sen: 'sensitivity',
+  sensitivity: 'sensitivity',
+  tpr: 'sensitivity',
+  pod: 'sensitivity',
+  recall: 'sensitivity',
 };
 
 export function normalizeMetric(name: string): string {
