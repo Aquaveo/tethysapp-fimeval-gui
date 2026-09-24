@@ -20,6 +20,10 @@
   <body style="margin: 0;">
     <div id="root"></div>
 
+    <script>
+      window.STATIC_IMAGES_BASE = "{% static tethys_app|public:'images/' %}";
+    </script>
+
     <!-- React JS bundle -->
     <script type="module"
             src="{% static tethys_app|public:'frontend/main.js' %}">

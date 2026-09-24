@@ -1,5 +1,5 @@
 // reactapp/src/api.ts
-const API_BASE = '/apps/fimeval-gui/api';
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export interface UploadResult {
   upload_id: string;

@@ -40,14 +40,14 @@ class App(TethysAppBase):
             CustomSetting(
                 name='minio_access_key',
                 type=CustomSetting.TYPE_STRING,
-                description='MinIO/S3 access key',
-                required=True,
+                description='S3/MinIO access key; leave blank in production to use IRSA',
+                required=False,
             ),
             CustomSetting(
                 name='minio_secret_key',
                 type=CustomSetting.TYPE_STRING,
-                description='MinIO/S3 secret key',
-                required=True,
+                description='S3/MinIO secret key; leave blank in production to use IRSA',
+                required=False,
             ),
             CustomSetting(
                 name='s3_bucket',
