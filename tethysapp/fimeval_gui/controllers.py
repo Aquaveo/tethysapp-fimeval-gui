@@ -65,9 +65,14 @@ def _get_owned_job(request, job_id):
     return job, None
 
 
-@controller(login_required=False)
+@controller(login_required=True)
 def home(request):
-    """Controller for the app home page (SPA catch-all)."""
+    """Controller for the app home page (SPA catch-all).
+
+    Login-gated: the SPA is per-user (runs, uploads), so an absent or expired
+    session redirects to the portal sign-in instead of loading a shell that
+    cannot reach its login-required APIs.
+    """
     return App.render(request, 'index.html')
 
 
