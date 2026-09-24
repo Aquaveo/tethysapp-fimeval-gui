@@ -3,7 +3,7 @@ import os
 from tethys_sdk.base import TethysAppBase
 from tethys_sdk.app_settings import CustomSetting, SchedulerSetting
 
-# Reproject offline in the web server too (the worker already does — BE28). The
+# BE47: reproject offline in the web server too (the worker already does — BE28). The
 # contingency-map tile endpoints ask rio-tiler for the COG's WGS84 bounds; with
 # PROJ_NETWORK=ON (conda's default) PROJ tries to download a NAD83 datum grid from
 # its CDN for EPSG:5070 -> WGS84, and when that fetch fails or times out the
