@@ -1,8 +1,4 @@
 // reactapp/src/api.ts
-// Derive the API base from Vite's BASE_URL so it matches wherever Tethys serves
-// the app: /apps/fimeval-gui/ in a multi-app portal, / in single-app mode. A
-// hardcoded /apps/fimeval-gui/api hits Tethys's catch_all (index.html) under
-// single-app mode, so every request returns HTML and the UI never loads.
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export interface UploadResult {

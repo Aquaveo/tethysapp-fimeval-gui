@@ -20,8 +20,6 @@
   <body style="margin: 0;">
     <div id="root"></div>
 
-    <!-- Static images base, resolved by static so the React app loads images
-         from S3/CDN in prod instead of a dead /static/ path on the app domain -->
     <script>
       window.STATIC_IMAGES_BASE = "{% static tethys_app|public:'images/' %}";
     </script>
