@@ -12,9 +12,10 @@ import rehypeSlug from 'rehype-slug';
 import rawDoc from './docs/fimeval.md?raw';
 import rawWebapp from './docs/webapp.md?raw';
 import './Docs.css';
+import { STATIC_IMAGES } from './static';
 
 // Where the repo's local Images/ were copied (served by Tethys like the chrome).
-const IMG_BASE = '/static/fimeval_gui/images/docs/';
+const IMG_BASE = `${STATIC_IMAGES}/docs/`;
 
 // Sanitize the raw HTML that rehype-raw parses out of the (now upstream-synced)
 // README, while keeping the presentational markup the docs actually use: the
