@@ -923,7 +923,12 @@ def api_job_tilejson(request, job_id):
     except Exception as exc:
         logger.info('No contingency tilejson for job %s: %s', job_id, exc)
         return JsonResponse({'error': 'no contingency map'}, status=404)
-    base = request.build_absolute_uri(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/')
+    # Derive the tile base from this request's own path so it matches wherever
+    # Tethys serves the app: /api/... in single-app mode, /apps/<app>/api/... in a
+    # multi-app portal. A hardcoded /apps/fimeval-gui/... path is swallowed by the
+    # single-app SPA catch-all, so the tiles come back as index.html and the map
+    # draws nothing.
+    base = request.build_absolute_uri(request.path.replace('tiles.json', 'tiles'))
     return JsonResponse({
         'tilejson': '2.2.0',
         'tiles': [base + '{z}/{x}/{y}.png/'],
