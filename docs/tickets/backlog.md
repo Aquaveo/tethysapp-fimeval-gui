@@ -71,7 +71,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE48 | not started | ~1–1.5 d |
 | BE43 | not started | ~5–7 d |
 | BE44 | not started | ~2–3 d |
-| FE47 | 🔄 in review (PR #21) | ~0.25–0.5 d |
+| FE47 | ✅ done (PR #21) | ~0.25–0.5 d |
 | FE49 | ✅ done | ~2–3 d |
 | FE50 | ✅ done | ~0.5 d |
 | FE51 | ✅ done | ~1.5–2 d |
@@ -80,13 +80,14 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE53 | ✅ done (PR #15) | ~0.5 d |
 | FE54 | ✅ done (via PR #15) | ~0.5–1 d |
 | FE55 | ✅ done (PR #19) | ~1 d |
-| FE56 | not started | ~3 h |
+| FE56 | ✅ done (PR #23) | ~3 h |
+| BE47 | ✅ done (PR #23) | ~2 h |
 
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
 and FE25 + its backend storage-layout (~3–4 d). Most other open tickets are ≤1–2 d
-each. (FE55 + BE46 merged via PR #19/#18; FE47 in review as PR #21; bootstrap median
-name-aliases in review as PR #20.)
+each. (FE55 + BE46 merged via PR #19/#18; FE47 merged via PR #21; bootstrap median
+name-aliases merged via PR #20; FE56 + BE47 in review as PR #23.)
 
 > Status column reconciled 2026-09-10 — several rows still marked "not started" had
 > shipped in PR #14/#15/#16. Estimates are legacy dev-days; new estimates are given
@@ -1135,3 +1136,28 @@ Out of Scope
 Notes: 2026-09-10 meeting (Reshma). Scope (a) — own-username label only — confirmed by Reshma
 2026-09-15; number FE56 pulled from the tracker. Applies to FIMsim too (handled separately).
 Est: ~3 h.
+
+### FIMEVAL-BE47 — Contingency map intermittently renders as a blank world map (PROJ_NETWORK)
+
+Description: The Results contingency-map panel sometimes showed the raster overlay and
+sometimes just a plain world map. Root cause: the web server inherits `PROJ_NETWORK=ON`
+from the conda env, so when rio-tiler asks for the COG's WGS84 bounds (EPSG:5070 →
+EPSG:4326) PROJ tries to download a NAD83 datum grid from its CDN. When that fetch fails
+or times out (~10 s) the transform returns `inf`, and rio-tiler silently falls back to
+whole-world bounds + TMS zoom 0 — the UI fits the map to the whole world with no visible
+overlay. Same failure class the worker already fixed in BE28.
+
+[✅]  `app.py` forces `PROJ_NETWORK=OFF` for the web-server process (our CRSs need no
+      downloadable grids), set before GDAL/PROJ is first used
+[✅]  `api/jobs/{id}/tiles.json` refuses (404 + `logger.error`) if the bounds still come
+      back non-finite or as the whole-world fallback, so a blank map can never render
+      silently again (the panel hides instead)
+[✅]  Tests: finite/local-bounds regression on an EPSG:5070 COG; world-fallback guard → 404
+
+Out of Scope
+- Vendoring PROJ grids / a PROJ_DATA bundle (not needed for our CRSs)
+- Making the frontend retry `tiles.json` (root cause removed; guard covers the rest)
+
+Notes: Reported by Reshma 2026-09-22 ("sometimes it loads, sometimes I just get a plain ol'
+map"). Verified live on runs 284/283: bounds resolve to the real footprint in <2 s (was
+~10 s → world). Number BE47 confirmed from the tracker 2026-09-24. Est: ~2 h.

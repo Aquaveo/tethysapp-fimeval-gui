@@ -18,7 +18,8 @@
   </head>
 
   <body style="margin: 0;">
-    <div id="root"></div>
+    {# FE56: the SPA reads the signed-in user's name for the sidebar's "Signed in as" label. #}
+    <div id="root" data-username="{{ request.user.username }}"></div>
 
     <!-- React JS bundle -->
     <script type="module"
