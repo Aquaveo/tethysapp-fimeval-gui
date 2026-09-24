@@ -71,7 +71,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE48 | not started | ~1–1.5 d |
 | BE43 | not started | ~5–7 d |
 | BE44 | not started | ~2–3 d |
-| FE47 | 🔄 in review (PR #21) | ~0.25–0.5 d |
+| FE47 | ✅ done (PR #21) | ~0.25–0.5 d |
 | FE49 | ✅ done | ~2–3 d |
 | FE50 | ✅ done | ~0.5 d |
 | FE51 | ✅ done | ~1.5–2 d |
@@ -86,8 +86,8 @@ warranted (historical); the numbers to plan around are the not-started ones.
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
 and FE25 + its backend storage-layout (~3–4 d). Most other open tickets are ≤1–2 d
-each. (FE55 + BE46 merged via PR #19/#18; FE47 in review as PR #21; bootstrap median
-name-aliases in review as PR #20.)
+each. (FE55 + BE46 merged via PR #19/#18; FE47 merged via PR #21; bootstrap median
+name-aliases merged via PR #20; FE56 + BE47 in review as PR #23.)
 
 > Status column reconciled 2026-09-10 — several rows still marked "not started" had
 > shipped in PR #14/#15/#16. Estimates are legacy dev-days; new estimates are given
