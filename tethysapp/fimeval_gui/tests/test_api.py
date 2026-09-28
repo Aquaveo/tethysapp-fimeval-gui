@@ -965,6 +965,12 @@ class TestJobsListEndpoint(TethysTestCase):
         self.assertEqual(jobs[0]['method'], 'bootstrap')
         self.assertEqual(jobs[0]['sub_method'], 'stratified')
 
+    def test_list_includes_owner_username(self):
+        # FE56: each run carries the owning user's name so runs are attributable.
+        job = self._make_job(self._props('uidU', method='convex_hull'))
+        jobs = self._list(job, [])
+        self.assertEqual(jobs[0]['username'], 'erin')
+
     def test_list_running_job_not_marked_error(self):
         # Regression (Copilot #16): a genuinely running job — _RUNNING marker
         # present, no _SUCCESS, created longer ago than the never-started timeout —
@@ -1863,6 +1869,44 @@ class TestTileJsonEndpoint(TethysTestCase):
         self.assertEqual(len(body['bounds']), 4)
         self.assertTrue(body['tiles'][0].endswith('/tiles/{z}/{x}/{y}.png/'))
         self.assertIn('minzoom', body)
+
+    def test_tilejson_bounds_are_finite_and_local(self):
+        # Regression: with PROJ_NETWORK=ON (conda's default) PROJ tries to fetch a
+        # NAD83 datum grid from its CDN for EPSG:5070 -> WGS84; when that fetch
+        # fails/times out the transform yields inf and rio-tiler silently falls back
+        # to whole-world bounds + zoom 0 -> the UI shows a blank world map. The app
+        # must force PROJ_NETWORK=OFF (as the worker does, BE28) so the bounds are
+        # the raster's real footprint.
+        import math
+        job = self._make_job()
+        cog = self._local_cog()
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value=cog):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertTrue(all(math.isfinite(b) for b in body['bounds']), body['bounds'])
+        self.assertNotEqual(body['bounds'], [-180.0, -90.0, 180.0, 90.0])
+        # The test COG sits in CONUS (Albers 1_600_000, 1_530_000): lon in (-125, -65).
+        self.assertTrue(-125 < body['bounds'][0] < -65, body['bounds'])
+        self.assertGreater(body['minzoom'], 0)
+
+    def test_tilejson_404_when_bounds_unresolvable(self):
+        # Defense in depth: if the geographic bounds still come back as the
+        # whole-world fallback, refuse to serve a TileJSON (the frontend hides the
+        # panel) rather than rendering a misleading blank world map.
+        job = self._make_job()
+        fake = MagicMock()
+        fake.__enter__.return_value = fake
+        fake.get_geographic_bounds.return_value = (-180.0, -90.0, 180.0, 90.0)
+        fake.minzoom, fake.maxzoom = 0, 24
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers._contingency_cog_src', return_value='/x.tif'), \
+             patch('rio_tiler.io.Reader', return_value=fake):
+            MockDJ.objects.get.return_value = job
+            response = self._get(77)
+        self.assertEqual(response.status_code, 404)
 
     def test_tilejson_404_when_no_cog(self):
         job = self._make_job()

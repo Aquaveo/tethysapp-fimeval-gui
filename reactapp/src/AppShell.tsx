@@ -15,6 +15,12 @@ import './AppShell.css';
 // It can always be reopened from the nav's "Guidelines" link.
 const HIDE_WELCOME_KEY = 'fimeval.hideWelcome';
 
+// FE56: the signed-in user's name, injected by the Django template onto #root
+// (data-username) so it's known on first paint and for any account.
+function signedInUsername(): string {
+  return document.getElementById('root')?.dataset.username ?? '';
+}
+
 function hideWelcomePref(): boolean {
   try {
     return localStorage.getItem(HIDE_WELCOME_KEY) === '1';
@@ -29,6 +35,7 @@ export default function AppShell() {
   const [dontShow, setDontShow] = useState(hideWelcomePref);
 
   const closeWelcome = () => setWelcomeOpen(false);
+  const username = signedInUsername();
 
   // The checkbox directly controls the persistent "hide on startup" preference.
   const changeDontShow = (v: boolean) => {
@@ -70,7 +77,9 @@ export default function AppShell() {
             >
               Guidelines
             </button>
-            <div className="wk-nav-foot">Signed in</div>
+            <div className="wk-nav-foot">
+              Signed in{username && <> as <strong>{username}</strong></>}
+            </div>
           </div>
         </nav>
 

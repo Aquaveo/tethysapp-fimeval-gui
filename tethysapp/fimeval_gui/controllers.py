@@ -730,6 +730,8 @@ def _list_user_jobs(request):
             'status': status,
             'created': created.isoformat() if created else None,
             'upload_id': props.get('upload_id'),
+            # FE56: label each run with its owning user (runs are per-user).
+            'username': getattr(getattr(j, 'user', None), 'username', None),
         })
     out.sort(key=lambda r: r['job_id'], reverse=True)
     return JsonResponse({'jobs': out})
@@ -918,6 +920,12 @@ def api_job_tilejson(request, job_id):
     except Exception as exc:
         logger.info('No contingency tilejson for job %s: %s', job_id, exc)
         return JsonResponse({'error': 'no contingency map'}, status=404)
+    if not all(math.isfinite(b) for b in bounds) or bounds == [-180.0, -90.0, 180.0, 90.0]:
+        logger.error(
+            'Contingency COG bounds for job %s could not be transformed to WGS84 '
+            '(got %s); check PROJ_NETWORK / PROJ data. Source: %s', job_id, bounds, src,
+        )
+        return JsonResponse({'error': 'contingency map bounds unresolvable'}, status=404)
     base = request.build_absolute_uri(request.path.replace('tiles.json', 'tiles'))
     return JsonResponse({
         'tilejson': '2.2.0',

@@ -235,6 +235,7 @@ export interface Job {
   status: JobStatus['status'];
   created: string | null;
   upload_id: string;
+  username: string | null;
 }
 
 export async function fetchJobs(): Promise<Job[]> {
