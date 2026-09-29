@@ -733,6 +733,11 @@ def _list_user_jobs(request):
             # FE56: label each run with its owning user (runs are per-user).
             'username': getattr(getattr(j, 'user', None), 'username', None),
         })
+    # Number runs per user (oldest = 1). The shared tethys_compute_tethysjob PK
+    # is global, so keying the label off job_id makes a new user's first run show
+    # as e.g. #4; a rank over the user's own jobs keeps it 1-based.
+    for n, r in enumerate(sorted(out, key=lambda r: r['job_id']), start=1):
+        r['run_number'] = n
     out.sort(key=lambda r: r['job_id'], reverse=True)
     return JsonResponse({'jobs': out})
 
