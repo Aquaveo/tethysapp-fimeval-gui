@@ -82,3 +82,7 @@ docs/superpowers/
 
 # Claude Code local settings (machine-specific)
 .claude/
+
+# Helm dependency artifacts
+deploy/chart/charts/
+deploy/chart/Chart.lock

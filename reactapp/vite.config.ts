@@ -2,9 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
-export default defineConfig(({ mode }) => ({
-  // BASE URL: dev = '/', production = Tethys app URL
-  base: mode === 'production' ? '/apps/fimeval-gui/' : '/',
+export default defineConfig(() => ({
+  // Router basename. Standalone single-app serves at '/'. Override VITE_BASE_URL
+  // for a portal sub-path deploy (e.g. /apps/fimeval-gui/).
+  base: process.env.VITE_BASE_URL || '/',
 
   plugins: [
     react(),

@@ -5,9 +5,23 @@ import os
 import tempfile
 
 import boto3
+from botocore.config import Config
 from dask import delayed
 
 from tethysapp.fimeval_gui.job_types.registry import JobType
+from tethysapp.fimeval_gui.storage import S3_KEY_PREFIX
+
+
+def _make_s3_client(s3_config):
+    kwargs = {'config': Config(signature_version='s3v4')}
+    if s3_config.get('endpoint_url'):
+        kwargs['endpoint_url'] = s3_config['endpoint_url']
+    access_key = s3_config.get('access_key')
+    secret_key = s3_config.get('secret_key')
+    if access_key and secret_key:
+        kwargs['aws_access_key_id'] = access_key
+        kwargs['aws_secret_access_key'] = secret_key
+    return boto3.client('s3', **kwargs)
 
 # CONUS Albers. Passed to fimeval so it reprojects all inputs to a common CRS
 # instead of bailing ("Mixed or non-CONUS CRS detected") when the benchmark and
@@ -212,21 +226,14 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
     """
     import fimeval
 
-    client = boto3.client(
-        's3',
-        endpoint_url=s3_config.get('endpoint_url') or None,
-        aws_access_key_id=s3_config['access_key'],
-        aws_secret_access_key=s3_config['secret_key'],
-    )
+    client = _make_s3_client(s3_config)
     bucket = s3_config['bucket']
-    input_prefix = f'uploads/{user_id}/{upload_id}/'
+    input_prefix = f'{S3_KEY_PREFIX}uploads/{user_id}/{upload_id}/'
     # Each run gets its own output namespace (run_id) so re-evaluating the same
     # upload with a different method/sampling doesn't collide with (or read back)
     # a prior run's results. Legacy runs (no run_id) keep the flat prefix.
-    output_prefix = (
-        f'outputs/{user_id}/{upload_id}/{run_id}/' if run_id
-        else f'outputs/{user_id}/{upload_id}/'
-    )
+    base_output = f'{S3_KEY_PREFIX}outputs/{user_id}/{upload_id}/'
+    output_prefix = f'{base_output}{run_id}/' if run_id else base_output
 
     # Signal that a worker has actually picked this job up (vs. queued at the
     # scheduler): the status endpoint reads this to report 'running' instead of

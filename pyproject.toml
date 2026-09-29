@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
     "fimeval>=0.1.64",
     "boto3",
+    "django-storages>=1.14",
     "dask[distributed]",
     "rio-tiler>=6",
 ]
