@@ -441,6 +441,57 @@ VALID_METHODS = {'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 # Bootstrap sampling approaches fimeval's run_bootstrap accepts (BE36).
 VALID_SUB_METHODS = {'random', 'systematic', 'stratified'}
 
+# FE36: advanced bootstrap parameters. Names mirror fimeval's EvaluateFIM /
+# run_bootstrap kwargs so nothing is renamed on the way through. Defaults are
+# fimeval's own (n_iterations/n_points) and its documented systematic example
+# (spacing_range). The caps bound worker cost, which scales with
+# n_iterations × n_points.
+BOOTSTRAP_DEFAULTS = {
+    'n_iterations': 100,
+    'n_points': 500,
+    'spacing_range': [100, 1000],
+    'seed': None,
+}
+MAX_N_ITERATIONS = 1000
+MAX_N_POINTS = 50000
+
+
+def _is_int(v):
+    # bool is an int subclass; a JSON ``true`` must not pass as 1.
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_number(v):
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and not math.isnan(v) and not math.isinf(v))
+
+
+def _parse_bootstrap_params(body):
+    """Validate the optional bootstrap knobs in a submit body.
+
+    Returns ``(params, None)`` with every key present (defaults filled in), or
+    ``(None, message)`` naming the offending field.
+    """
+    params = dict(BOOTSTRAP_DEFAULTS)
+    for key, cap in (('n_iterations', MAX_N_ITERATIONS), ('n_points', MAX_N_POINTS)):
+        if key in body and body[key] is not None:
+            v = body[key]
+            if not _is_int(v) or not 1 <= v <= cap:
+                return None, f'{key} must be an integer between 1 and {cap}'
+            params[key] = v
+    if 'spacing_range' in body and body['spacing_range'] is not None:
+        sr = body['spacing_range']
+        if (not isinstance(sr, (list, tuple)) or len(sr) != 2
+                or not all(_is_number(x) for x in sr)
+                or sr[0] <= 0 or sr[0] >= sr[1]):
+            return None, 'spacing_range must be [min, max] in metres with 0 < min < max'
+        params['spacing_range'] = [sr[0], sr[1]]
+    if 'seed' in body and body['seed'] is not None:
+        if not _is_int(body['seed']):
+            return None, 'seed must be an integer'
+        params['seed'] = body['seed']
+    return params, None
+
 # Control-plane objects the worker writes to the output prefix (terminal markers
 # + the input-metadata file + the internal contingency tiling COG); not
 # user-facing output files.
@@ -508,6 +559,13 @@ def api_jobs_submit(request):
             {'error': f'sub_method must be one of {sorted(VALID_SUB_METHODS)}'},
             status=400,
         )
+    # FE36: advanced bootstrap knobs. Parsed only for bootstrap; the other
+    # methods ignore them and store nothing.
+    bootstrap_params = None
+    if method == 'bootstrap':
+        bootstrap_params, err = _parse_bootstrap_params(body)
+        if err:
+            return JsonResponse({'error': err}, status=400)
 
     user_id = str(request.user.id)
     storage = _get_storage()
@@ -653,11 +711,13 @@ def api_jobs_submit(request):
         'method': method,
         'target_resolution': target_resolution,
         'sub_method': sub_method,
+        'bootstrap_params': bootstrap_params,
         'run_id': run_id,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
-        target_resolution=target_resolution, sub_method=sub_method, run_id=run_id,
+        target_resolution=target_resolution, sub_method=sub_method,
+        bootstrap_params=bootstrap_params, run_id=run_id,
     )
 
     try:
@@ -718,6 +778,7 @@ def _list_user_jobs(request):
             'job_id': j.id,
             'method': props.get('method'),
             'sub_method': props.get('sub_method'),
+            'bootstrap_params': props.get('bootstrap_params'),
             'status': status,
             'created': created.isoformat() if created else None,
             'upload_id': props.get('upload_id'),
@@ -885,6 +946,7 @@ def api_job_status(request, job_id):
         'completed': job.completion_time.isoformat() if job.completion_time else None,
         'method': props.get('method'),
         'sub_method': props.get('sub_method'),
+        'bootstrap_params': props.get('bootstrap_params'),
         'upload_id': props.get('upload_id'),
         'reason': reason,
         'inputs': inputs,

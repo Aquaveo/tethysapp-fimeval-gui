@@ -189,7 +189,8 @@ def _read_vector_crs(shp_path):
 
 
 def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: dict,
-                          target_resolution=None, sub_method='stratified', run_id=None):
+                          target_resolution=None, sub_method='stratified',
+                          bootstrap_params=None, run_id=None):
     """Dask worker task: run one FIMeval evaluation end-to-end.
 
     Downloads the job's inputs from ``uploads/<user_id>/<upload_id>/`` (rasters
@@ -209,6 +210,9 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         method: a fimeval extent method (``smallest_extent``, ``convex_hull``,
             ``intersected_extent``, ``bootstrap``, ``AOI``).
         s3_config: ``endpoint_url`` / ``access_key`` / ``secret_key`` / ``bucket``.
+        bootstrap_params: optional FE36 knobs (``n_iterations``, ``n_points``,
+            ``spacing_range`` [min, max], ``seed``) already validated at submit;
+            only applied for ``bootstrap``. None = fimeval's own defaults.
     """
     import fimeval
 
@@ -331,11 +335,19 @@ def run_evaluate_fim_task(upload_id: str, user_id: str, method: str, s3_config: 
         extra = {}
         if method == 'bootstrap':
             extra['sub_method'] = sub_method
+            bp = bootstrap_params or {}
+            # FE36: user-chosen knobs. Anything unset falls through to
+            # fimeval's defaults; seed=None means "no seed" (fimeval's default).
+            for key in ('n_iterations', 'n_points'):
+                if bp.get(key) is not None:
+                    extra[key] = bp[key]
+            if bp.get('seed') is not None:
+                extra['seed'] = bp['seed']
             # Systematic sampling requires a spacing_range or run_bootstrap
-            # raises ValueError. Supply fimeval's documented default so the job
-            # runs; FE36 will expose this as a knob.
+            # raises ValueError. Use the user's range when given, else
+            # fimeval's documented default. The other approaches ignore it.
             if sub_method == 'systematic':
-                extra['spacing_range'] = (100, 1000)
+                extra['spacing_range'] = tuple(bp.get('spacing_range') or (100, 1000))
         # AOI evaluates against a user-supplied boundary shapefile.
         if method == 'AOI' and shapefile_path:
             extra['shapefile_dir'] = shapefile_path
@@ -403,5 +415,6 @@ class EvaluateFIMJobType(JobType):
             params['s3_config'],
             target_resolution=params.get('target_resolution'),
             sub_method=params.get('sub_method') or 'stratified',
+            bootstrap_params=params.get('bootstrap_params'),
             run_id=params.get('run_id'),
         )
