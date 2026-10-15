@@ -328,12 +328,13 @@ class TestSubmitEndpoint(TethysTestCase):
         )
 
     def _submit(self, upload_id, method='intersected_extent', downsample=False,
-                sub_method=None):
+                sub_method=None, **extra):
         payload = {'upload_id': upload_id, 'method': method}
         if downsample:
             payload['downsample'] = True
         if sub_method is not None:
             payload['sub_method'] = sub_method
+        payload.update(extra)
         return self.client.post(
             '/apps/fimeval-gui/api/jobs/',
             data=json.dumps(payload),
@@ -455,6 +456,81 @@ class TestSubmitEndpoint(TethysTestCase):
         ):
             response = self._submit('u_badsm', method='bootstrap', sub_method='bogus')
         self.assertEqual(response.status_code, 400)
+
+    # ── FE36: advanced bootstrap parameters ──
+    def _submit_small(self, upload_id, **kw):
+        self._put_upload(upload_id)
+        with patch(
+            'tethysapp.fimeval_gui.controllers._estimate_working_pixels',
+            return_value={'pixels': 1000, 'fit_resolution_m': 1.0},
+        ):
+            return self._submit(upload_id, **kw)
+
+    def test_submit_bootstrap_stores_user_params(self):
+        response = self._submit_small(
+            'u_bp', method='bootstrap', sub_method='systematic',
+            n_iterations=200, n_points=1000, spacing_range=[50, 500], seed=42,
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.mock_job.extended_properties['bootstrap_params'], {
+            'n_iterations': 200, 'n_points': 1000,
+            'spacing_range': [50, 500], 'seed': 42,
+        })
+
+    def test_submit_bootstrap_params_default_when_omitted(self):
+        response = self._submit_small('u_bpd', method='bootstrap')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.mock_job.extended_properties['bootstrap_params'], {
+            'n_iterations': 100, 'n_points': 500,
+            'spacing_range': [100, 1000], 'seed': None,
+        })
+
+    def test_submit_non_bootstrap_ignores_params(self):
+        response = self._submit_small('u_bpi', method='convex_hull', n_iterations=5)
+        self.assertEqual(response.status_code, 202)
+        self.assertIsNone(self.mock_job.extended_properties.get('bootstrap_params'))
+
+    def test_submit_rejects_bad_n_iterations(self):
+        for bad in (0, 1001, 'abc', 2.5):
+            with self.subTest(bad=bad):
+                response = self._submit_small('u_bpni', method='bootstrap', n_iterations=bad)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('n_iterations', json.loads(response.content)['error'])
+
+    def test_submit_rejects_bad_n_points(self):
+        for bad in (0, 50001, 'x'):
+            with self.subTest(bad=bad):
+                response = self._submit_small('u_bpnp', method='bootstrap', n_points=bad)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('n_points', json.loads(response.content)['error'])
+
+    def test_submit_rejects_bad_spacing_range(self):
+        for bad in ([1000, 100], [0, 100], [100], 'wide', [100, 100]):
+            with self.subTest(bad=bad):
+                response = self._submit_small(
+                    'u_bpsr', method='bootstrap', sub_method='systematic', spacing_range=bad,
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('spacing_range', json.loads(response.content)['error'])
+
+    def test_submit_rejects_non_integer_seed(self):
+        for bad in ('abc', 1.5, True):
+            with self.subTest(bad=bad):
+                response = self._submit_small('u_bps', method='bootstrap', seed=bad)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('seed', json.loads(response.content)['error'])
+
+    def test_submit_forwards_bootstrap_params_to_job_type(self):
+        # REGISTRY is imported inside api_submit, so patch it at its source.
+        mock_jt = MagicMock()
+        with patch('tethysapp.fimeval_gui.job_types.REGISTRY', {'evaluate_fim': mock_jt}):
+            response = self._submit_small(
+                'u_bpf', method='bootstrap', n_iterations=7, seed=1,
+            )
+        self.assertEqual(response.status_code, 202)
+        kwargs = mock_jt.build_delayed.call_args.kwargs
+        self.assertEqual(kwargs['bootstrap_params']['n_iterations'], 7)
+        self.assertEqual(kwargs['bootstrap_params']['seed'], 1)
 
     # ── BE37: benchmark input validation ──
     def test_submit_rejects_benchmark_without_bm_token(self):
@@ -669,6 +745,30 @@ class TestStatusEndpoint(TethysTestCase):
             MockClient.return_value.close = MagicMock()
             response = self._get(42)
         self.assertEqual(json.loads(response.content)['status'], 'complete')
+
+    def test_status_includes_bootstrap_params(self):
+        # FE36: the run detail shows the bootstrap knobs the job ran with.
+        params = {'n_iterations': 200, 'n_points': 500, 'spacing_range': [100, 1000], 'seed': 42}
+        job = self._make_job(self.user, extended_properties={
+            'upload_id': 'uidB', 'user_id': str(self.user.id),
+            'method': 'bootstrap', 'sub_method': 'random', 'bootstrap_params': params,
+        })
+        mock_future = MagicMock()
+        mock_future.status = 'finished'
+        mock_storage = MagicMock()
+        mock_storage.etag.return_value = None
+        empty_body = MagicMock()
+        empty_body.read.return_value = b''  # no inputs.json -> inputs stays None
+        mock_storage.get_object.return_value = {'Body': empty_body}
+        with patch('tethysapp.fimeval_gui.controllers.DaskJob') as MockDJ, \
+             patch('tethysapp.fimeval_gui.controllers.Client') as MockClient, \
+             patch('tethysapp.fimeval_gui.controllers.Future', return_value=mock_future), \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage):
+            MockDJ.objects.get.return_value = job
+            MockClient.return_value.close = MagicMock()
+            response = self._get(42)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['bootstrap_params'], params)
 
     def test_status_falls_back_to_tethys_when_dask_unreachable(self):
         job = self._make_job(self.user)
@@ -964,6 +1064,13 @@ class TestJobsListEndpoint(TethysTestCase):
         jobs = self._list(job, [])
         self.assertEqual(jobs[0]['method'], 'bootstrap')
         self.assertEqual(jobs[0]['sub_method'], 'stratified')
+
+    def test_list_includes_bootstrap_params(self):
+        params = {'n_iterations': 50, 'n_points': 500, 'spacing_range': [100, 1000], 'seed': None}
+        job = self._make_job(self._props('uidP', method='bootstrap', sub_method='random',
+                                         bootstrap_params=params))
+        jobs = self._list(job, [])
+        self.assertEqual(jobs[0]['bootstrap_params'], params)
 
     def test_list_includes_owner_username(self):
         # FE56: each run carries the owning user's name so runs are attributable.
