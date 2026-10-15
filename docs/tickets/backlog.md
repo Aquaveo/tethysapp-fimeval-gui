@@ -50,7 +50,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
-| FE36 | not started (was FE18) | ~2 d |
+| FE36 | 🔍 in review (PR #24) | ~2 d |
 | BE36 | ✅ done (PR #14) | ~1 d |
 | BE37 | ✅ done (PR #14) | ~1.5 d |
 | BE38 | ✅ done (PR #14) | ~0.25 d |
@@ -82,6 +82,11 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE55 | ✅ done (PR #19) | ~1 d |
 | FE56 | ✅ done (PR #23) | ~3 h |
 | BE47 | ✅ done (PR #23) | ~2 h |
+| BE49 | built, awaiting manual test (branch `feat/be49-shapefile-bundle`) | ~3 h |
+| FE60 | built, awaiting manual test (branch `feat/fe60-boxplot-counts`) | ~1.5 h |
+| FE57 | 🔍 in review (PR #25) | ~2 h |
+| FE58 + BE48 | not started | ~8 h |
+| FE59 | not started | ~1 h |
 
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
@@ -336,7 +341,9 @@ Notes: Was mislabeled FE18 (tracker's "Pre-staged Benchmark Upload UI"). **Scope
 2026-08-26:** `sub_method` dropped (shipped via BE36/FE37), `target_resolution` moved to
 FE48/BE42, and expanded to the full desktop bootstrap knob set — added `spacing_range`,
 `seed`, `save_points`, `save_every`. Could merge with FE48 into one "Advanced parameters"
-panel. Est: ~2 d.
+panel. Est: ~2 d. **Shipped 2026-10-15 as PR #24** with `n_iterations`, `n_points`,
+`spacing_range`, `seed` (Reshma's scope call); `save_points`/`save_every` left out. Panel
+is open by default per Reshma's review.
 
 ### FIMEVAL-FE19 — Configurable, switchable basemaps
 
@@ -1161,3 +1168,99 @@ Out of Scope
 Notes: Reported by Reshma 2026-09-22 ("sometimes it loads, sometimes I just get a plain ol'
 map"). Verified live on runs 284/283: bounds resolve to the real footprint in <2 s (was
 ~10 s → world). Number BE47 confirmed from the tracker 2026-09-24. Est: ~2 h.
+
+### FIMEVAL-BE49 — 🐛 AOI: reject boundary bundles missing `.shx`/`.dbf`/`.prj` at presign and submit
+
+Description: Prod tester (Dipsikha, 2026-10-08) got `Unable to open …/boundary/FIMEvaluatedExtent.shx
+… SHAPE_RESTORE_SHX` on an AOI run. Root cause: only the `.shp` had been uploaded. The server
+only checks that a `.shp` exists (presign filename check + submit-time `has_shp` in
+`controllers.py`), so an incomplete bundle reaches the worker and fails mid-run. Reproduced
+locally: geopandas fails without `.shx`; without `.prj` the CRS reads as None, which breaks
+fimeval's `to_crs`. FE43 enforces the full set client-side; this ticket makes the backend
+enforce it too (defense in depth — the API is callable without the SPA).
+
+[  ]  `api/upload/presign` returns 400 with a message naming the missing parts unless `.shp`, `.shx`, `.dbf`, `.prj` share one stem
+[  ]  `api/upload` (multipart path) applies the same rule
+[  ]  Submit (`api/jobs`, method AOI) verifies all four keys exist with size > 0 under `boundary/`, 400 otherwise
+[  ]  Worker sets `SHAPE_RESTORE_SHX=YES` so a stray missing index is rebuilt rather than fatal
+[  ]  TDD: presign/submit rejection tests + one worker test with the config set
+
+Out of Scope
+- Client-side validation and `.zip`/folder bundle intake (FE43)
+- Modifying fimeval
+
+Notes: Tracker title: "BYU CIROH: FIMeval GUI – [Bug] AOI: Server-Side Validation of the Boundary
+Shapefile Bundle (FIMEVAL-BE49)". Number BE49 confirmed from the tracker 2026-10-08. Est: ~3 h.
+
+### FIMEVAL-FE60 — Bootstrap box plots: drop the TN/FP/FN/TP count classes
+
+Description: Dipsikha (2026-10-08): the four count columns are on a different scale from the
+score metrics and swamp the box-plot panel. Hide them from the plots. The medians table keeps
+all columns, per the 2026-09-10 decision (BE46).
+
+[  ]  `BootstrapBoxPlots` filters out TN, FP, FN, TP (and their name aliases) before rendering
+[  ]  Metrics table and bootstrap medians unchanged
+[  ]  Unit test: counts excluded, scores retained
+
+Out of Scope
+- Per-metric axis scaling or a second axis for counts
+- Backend changes (`api/jobs/{id}/bootstrap` keeps returning every column)
+
+Notes: Tracker title: "BYU CIROH: FIMeval GUI – [Improvement] Results: Exclude Count Classes From
+Bootstrap Box Plots (FIMEVAL-FE60)". Number FE60 confirmed from the tracker 2026-10-08. Est: ~1.5 h.
+
+### FIMEVAL-FE57 — Sidebar: "Sign out" link under "Signed in as"
+
+Description: There is no way to end the session from inside the app; users have to know the
+portal's logout URL. Add a small "Sign out" link beneath the FE56 "Signed in as <user>" label
+in the sidebar footer.
+
+[x]  `index.html` exposes Tethys's `accounts:logout` route on `#root` (`data-logout-url`)
+[x]  `AppShell` renders "Sign out" as a small navy link under "Signed in as"
+[x]  Test: home exposes the logout URL
+
+Out of Scope
+- Making the SPA home view require login / `Cache-Control: no-store` so Back after sign-out
+  bounces to login instead of showing an anonymous shell (pre-existing; observed 2026-10-15,
+  worth its own ticket)
+
+Notes: Requested 2026-10-01; wording "Sign out" approved. Tracker title: "BYU CIROH: FIMeval
+GUI – [Feature] Sidebar: Sign Out Link Under "Signed in as" (FIMEVAL-FE57)". Manual test
+passed 2026-10-15; PR #25. Est: ~2 h.
+
+### FIMEVAL-FE58 + FIMEVAL-BE48 — Delete a run from the Runs list
+
+Description: Users cannot remove runs they no longer need, so the list only ever grows. Add a ×
+on the right of each run card; on confirm the run disappears from the list and its outputs are
+purged.
+
+[  ]  BE48: `DELETE api/jobs/{id}` with ownership check (404 for another user's job)
+[  ]  BE48: purges the job's S3 outputs prefix; purges `uploads/<upload_id>/` only if no other
+      run references that `upload_id` (FE41 Re-evaluate shares uploads)
+[  ]  BE48: deletes the DaskJob row
+[  ]  FE58: × on each run card → confirm dialog → list refreshes without the run
+[  ]  FE58: deleting the currently open run returns to the empty detail state
+
+Out of Scope
+- Bulk delete; admin deletion of other users' runs
+- Retention policy / auto-expiry (relates to BE26)
+
+Notes: Requested 2026-10-01. Tracker titles: "…[Feature] Runs API: DELETE Endpoint That Removes
+the Job Record and Its S3 Outputs (FIMEVAL-BE48)" / "…[Feature] Runs List: Delete (×) on Run
+Cards With Confirm and List Refresh (FIMEVAL-FE58)". Est: ~8 h (5 BE + 3 FE).
+
+### FIMEVAL-FE59 — Sidebar: "Documentation" / "Guidelines" as white navy-text buttons
+
+Description: The sidebar banner's white swoosh moves with screen size, so the navy
+"Documentation" and "Guidelines" text is sometimes unreadable against it. Give the two links a
+white, button-like background with navy (`--chrome-2`) text, less rounded than `.wk-new-btn`
+(≈4–5 px vs 9 px). Supersedes the navy-text-only tweak from PR #23.
+
+[  ]  Both links styled as white buttons with navy text; hover/active states stay readable
+[  ]  Readable at every sidebar height where the swoosh overlaps them
+
+Out of Scope
+- Moving or resizing the banner artwork
+
+Notes: Requested 2026-10-01. Tracker title: "BYU CIROH: FIMeval GUI – [Feature] Sidebar:
+Documentation/Guidelines as White Navy-Text Buttons (FIMEVAL-FE59)". Est: ~1 h.
