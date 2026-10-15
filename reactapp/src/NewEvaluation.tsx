@@ -100,7 +100,7 @@ export default function NewEvaluation() {
   const [bpForm, setBpForm] = useState<BootstrapForm>(
     reuse?.bootstrapParams ? formFromBootstrapParams(reuse.bootstrapParams) : DEFAULT_BOOTSTRAP_FORM,
   );
-  const [advOpen, setAdvOpen] = useState(false);
+  const [advOpen, setAdvOpen] = useState(true); // open by default so the knobs are discoverable; user may collapse
   const setBp = (k: keyof BootstrapForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setBpForm((f) => ({ ...f, [k]: e.target.value }));
   const [submitting, setSubmitting] = useState(false);
