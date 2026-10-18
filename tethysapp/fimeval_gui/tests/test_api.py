@@ -1090,6 +1090,7 @@ class TestJobsListEndpoint(TethysTestCase):
             jobs.append(job)
         mock_storage = MagicMock()
         mock_storage.etag.side_effect = lambda k: None
+        mock_storage.get_object.side_effect = KeyError('no inputs.json')
         with patch('tethysapp.fimeval_gui.controllers.App') as MockApp, \
              patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage), \
              patch('tethysapp.fimeval_gui.controllers._get_owned_job', return_value=(jobs[1], None)):
