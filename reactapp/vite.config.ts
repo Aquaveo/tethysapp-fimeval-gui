@@ -5,7 +5,7 @@ import path from 'path';
 export default defineConfig(() => ({
   // Router basename. Standalone single-app serves at '/'. Override VITE_BASE_URL
   // for a portal sub-path deploy (e.g. /apps/fimeval-gui/).
-  base: process.env.VITE_BASE_URL || '/',
+  base: process.env.VITE_BASE_URL || '/apps/fimeval-gui/',
 
   plugins: [
     react(),
