@@ -1,5 +1,6 @@
 // reactapp/src/api.ts
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
+import type { BootstrapParams } from './bootstrapParams';
 
 export interface UploadResult {
   upload_id: string;
@@ -161,10 +162,13 @@ export async function submitJob(
   method: string,
   downsample = false,
   subMethod?: string,
+  bootstrapParams?: BootstrapParams | null,
 ): Promise<SubmitResult> {
   const payload: Record<string, unknown> = { upload_id: uploadId, method };
   if (downsample) payload.downsample = true;
   if (subMethod) payload.sub_method = subMethod;
+  // FE36: advanced bootstrap knobs (validated client-side; server re-checks).
+  if (bootstrapParams) Object.assign(payload, bootstrapParams);
   const response = await fetch(`${API_BASE}/jobs/`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -214,6 +218,7 @@ export interface JobStatus {
   completed: string | null;
   method: string | null;
   sub_method: string | null;
+  bootstrap_params: BootstrapParams | null;
   upload_id: string | null;
   reason: string | null;
   inputs: JobInputs | null;
@@ -233,6 +238,7 @@ export interface Job {
   run_number?: number;
   method: string | null;
   sub_method: string | null;
+  bootstrap_params: BootstrapParams | null;
   status: JobStatus['status'];
   created: string | null;
   upload_id: string;

@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getJobStatus, type JobStatus } from './api';
 import { methodLabel } from './methodLabel';
 import InputFiles from './InputFiles';
+import { bootstrapSummary } from './bootstrapParams';
 import ResultsView from './ResultsView';
 import './RunDetail.css';
 
@@ -68,6 +69,9 @@ export default function RunDetail() {
   }, [running]);
 
   const method = status?.method ? methodLabel(status.method, status.sub_method) : null;
+  // FE36: the bootstrap knobs this run used (null for pre-FE36 runs).
+  const params = status?.method === 'bootstrap'
+    ? bootstrapSummary(status.bootstrap_params, status.sub_method) : null;
   const terminal = !!status && (status.status === 'complete' || status.status === 'error');
   const canReevaluate = !!status?.upload_id && !!status?.method;
 
@@ -82,6 +86,8 @@ export default function RunDetail() {
           uploadId: status.upload_id,
           method: status.method,
           hasBoundary: !!status.inputs?.boundary,
+          subMethod: status.sub_method,
+          bootstrapParams: status.bootstrap_params,
         },
       },
     });
@@ -100,6 +106,7 @@ export default function RunDetail() {
           </button>
         )}
       </header>
+      {params && <p className="rd-params">{params}</p>}
 
       {status === null && !failed && (
         <div className="rd-center"><span className="rd-spinner" aria-hidden="true" />Loading&hellip;</div>

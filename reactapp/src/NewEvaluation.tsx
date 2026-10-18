@@ -6,6 +6,10 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import { presignUpload, putFile, submitJob, SubmitTooLargeError, type TooLargeInfo } from './api';
+import {
+  DEFAULT_BOOTSTRAP_FORM, validateBootstrapForm, bootstrapSummary, formFromBootstrapParams,
+  type BootstrapForm, type BootstrapParams,
+} from './bootstrapParams';
 import './NewEvaluation.css';
 
 // Full Domain methods evaluate *every* pixel in the chosen domain; Bootstrap
@@ -34,7 +38,19 @@ const SAMPLING: { value: SubMethod; label: string; desc: string }[] = [
 
 // Re-evaluate (FE41): the wizard can be opened pre-loaded with an existing run's
 // already-uploaded inputs, passed via router state from RunDetail.
-type ReuseState = { uploadId: string; method: string; hasBoundary: boolean };
+type ReuseState = {
+  uploadId: string;
+  method: string;
+  hasBoundary: boolean;
+  // FE36: previous run's sampling approach + knobs, pre-filled for a tweak-and-rerun.
+  subMethod?: string | null;
+  bootstrapParams?: BootstrapParams | null;
+};
+
+const SUB_METHOD_VALUES: SubMethod[] = ['random', 'stratified', 'systematic'];
+function coerceSubMethod(sm: string | null | undefined): SubMethod {
+  return sm && (SUB_METHOD_VALUES as string[]).includes(sm) ? (sm as SubMethod) : 'stratified';
+}
 
 const METHOD_VALUES: Method[] = ['intersected_extent', 'convex_hull', 'AOI', 'bootstrap'];
 function coerceMethod(m: string): Method {
@@ -78,7 +94,15 @@ export default function NewEvaluation() {
   const [method, setMethod] = useState<Method>(
     reuse ? coerceMethod(reuse.method) : 'intersected_extent',
   );
-  const [subMethod, setSubMethod] = useState<SubMethod>('stratified');
+  const [subMethod, setSubMethod] = useState<SubMethod>(coerceSubMethod(reuse?.subMethod));
+  // FE36: advanced bootstrap knobs (collapsed by default; defaults = fimeval's,
+  // or the previous run's values when re-evaluating).
+  const [bpForm, setBpForm] = useState<BootstrapForm>(
+    reuse?.bootstrapParams ? formFromBootstrapParams(reuse.bootstrapParams) : DEFAULT_BOOTSTRAP_FORM,
+  );
+  const [advOpen, setAdvOpen] = useState(true); // open by default so the knobs are discoverable; user may collapse
+  const setBp = (k: keyof BootstrapForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setBpForm((f) => ({ ...f, [k]: e.target.value }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<FileProgress[] | null>(null);
@@ -86,6 +110,10 @@ export default function NewEvaluation() {
 
   const isAOI = method === 'AOI';
   const isBootstrap = method === 'bootstrap';
+  const isSystematic = subMethod === 'systematic';
+  const bp = validateBootstrapForm(bpForm, subMethod);
+  // Only bootstrap sends the knobs; the other methods ignore them server-side too.
+  const bootstrapPayload = isBootstrap ? bp.payload : undefined;
   const hasShp = boundary.some((f) => f.name.toLowerCase().endsWith('.shp'));
 
   // BE37 benchmark-input validation (block before upload).
@@ -104,7 +132,8 @@ export default function NewEvaluation() {
     && !benchmarkBmError && !candidateBmError && !dupNameError;
   // In reuse mode we can't add a boundary (no upload step), so AOI is only valid
   // if the reused run already has one.
-  const step2Valid = reuseMode ? (!isAOI || reuseHasBoundary) : (!isAOI || hasShp);
+  const step2Valid = (reuseMode ? (!isAOI || reuseHasBoundary) : (!isAOI || hasShp))
+    && (!isBootstrap || bp.payload !== null);
 
   const addCandidates = (files: File[]) => setCandidates((p) => mergeUnique(p, files));
   const removeCandidate = (i: number) => setCandidates((p) => p.filter((_, idx) => idx !== i));
@@ -120,7 +149,7 @@ export default function NewEvaluation() {
       setSubmitting(true);
       try {
         const { job_id } = await submitJob(
-          reuseUploadId, method, false, isBootstrap ? subMethod : undefined,
+          reuseUploadId, method, false, isBootstrap ? subMethod : undefined, bootstrapPayload,
         );
         navigate(`/runs/${job_id}`);
       } catch (e) {
@@ -177,7 +206,7 @@ export default function NewEvaluation() {
       );
 
       const { job_id } = await submitJob(
-        upload_id, method, false, isBootstrap ? subMethod : undefined,
+        upload_id, method, false, isBootstrap ? subMethod : undefined, bootstrapPayload,
       );
       navigate(`/runs/${job_id}`);
     } catch (e) {
@@ -201,7 +230,7 @@ export default function NewEvaluation() {
     setSubmitting(true);
     try {
       const { job_id } = await submitJob(
-        uploadId, method, true, isBootstrap ? subMethod : undefined,
+        uploadId, method, true, isBootstrap ? subMethod : undefined, bootstrapPayload,
       );
       navigate(`/runs/${job_id}`);
     } catch (e) {
@@ -329,6 +358,51 @@ export default function NewEvaluation() {
                       </button>
                     ))}
                   </div>
+
+                  <details className="ne-advanced" open={advOpen}
+                    onToggle={(e) => setAdvOpen(e.currentTarget.open)}>
+                    <summary>Advanced parameters</summary>
+                    <div className="ne-adv-grid">
+                      <label className="ne-field">
+                        <span>Iterations</span>
+                        <input id="bp-iterations" type="number" inputMode="numeric" min={1} max={1000} step={1}
+                          value={bpForm.nIterations} onChange={setBp('nIterations')}
+                          aria-invalid={!!bp.errors.nIterations} />
+                      </label>
+                      <label className="ne-field" aria-disabled={isSystematic}>
+                        <span>Points per iteration</span>
+                        <input id="bp-points" type="number" inputMode="numeric" min={1} max={50000} step={1}
+                          value={bpForm.nPoints} onChange={setBp('nPoints')}
+                          disabled={isSystematic} aria-invalid={!!bp.errors.nPoints} />
+                      </label>
+                      <label className="ne-field ne-field-range" aria-disabled={!isSystematic}>
+                        <span>Grid spacing min / max (m)</span>
+                        <span className="ne-range">
+                          <input id="bp-spacing-min" type="number" inputMode="decimal" min={0} step="any"
+                            value={bpForm.spacingMin} onChange={setBp('spacingMin')}
+                            disabled={!isSystematic} aria-invalid={!!bp.errors.spacing} aria-label="Spacing min (m)" />
+                          <span aria-hidden="true">–</span>
+                          <input id="bp-spacing-max" type="number" inputMode="decimal" min={0} step="any"
+                            value={bpForm.spacingMax} onChange={setBp('spacingMax')}
+                            disabled={!isSystematic} aria-invalid={!!bp.errors.spacing} aria-label="Spacing max (m)" />
+                        </span>
+                      </label>
+                      <label className="ne-field">
+                        <span>Random seed</span>
+                        <input id="bp-seed" type="text" inputMode="numeric" placeholder="blank = random"
+                          value={bpForm.seed} onChange={setBp('seed')} aria-invalid={!!bp.errors.seed} />
+                      </label>
+                    </div>
+                    {Object.values(bp.errors).map((msg) => (
+                      <p className="ne-hint ne-hint-err" key={msg}>{msg}</p>
+                    ))}
+                    <p className="ne-hint">
+                      {isSystematic
+                        ? 'Systematic sampling picks a random grid spacing within the range each iteration; points per iteration does not apply.'
+                        : 'Grid spacing applies to systematic sampling only.'}
+                      {' '}Set a seed to make the run reproducible.
+                    </p>
+                  </details>
                 </div>
               )}
             </section>
@@ -383,6 +457,9 @@ export default function NewEvaluation() {
               </>
             )}
             <div className="ne-review-row"><span className="ne-k">Method</span><span>{methodSummary(method, subMethod)}</span></div>
+            {isBootstrap && bootstrapPayload && (
+              <div className="ne-review-row"><span className="ne-k">Parameters</span><span>{bootstrapSummary(bootstrapPayload, subMethod)}</span></div>
+            )}
           </div>
         )}
       </div>

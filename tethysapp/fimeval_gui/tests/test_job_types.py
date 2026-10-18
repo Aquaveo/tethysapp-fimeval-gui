@@ -156,6 +156,92 @@ class TestRunEvaluateFIMTask(unittest.TestCase):
         self.assertEqual(mock_eval.call_args.kwargs.get('sub_method'), 'systematic')
         self.assertEqual(mock_eval.call_args.kwargs.get('spacing_range'), (100, 1000))
 
+    # ── FE36: advanced bootstrap parameters ──
+    def _stage_upload(self):
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='uploads/1/abc/candidate_0.tif', Body=b'c')
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_bootstrap_params_forwarded_to_fimeval(self, mock_eval):
+        self._stage_upload()
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task(
+            'abc', '1', 'bootstrap', S3_CONFIG, sub_method='systematic',
+            bootstrap_params={'n_iterations': 200, 'n_points': 1000,
+                              'spacing_range': [50, 500], 'seed': 42},
+        )
+
+        kw = mock_eval.call_args.kwargs
+        self.assertEqual(kw.get('n_iterations'), 200)
+        self.assertEqual(kw.get('n_points'), 1000)
+        self.assertEqual(kw.get('spacing_range'), (50, 500))  # fimeval wants a tuple
+        self.assertEqual(kw.get('seed'), 42)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_bootstrap_params_spacing_only_sent_for_systematic(self, mock_eval):
+        self._stage_upload()
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task(
+            'abc', '1', 'bootstrap', S3_CONFIG, sub_method='stratified',
+            bootstrap_params={'n_iterations': 20, 'n_points': 50,
+                              'spacing_range': [50, 500], 'seed': None},
+        )
+
+        kw = mock_eval.call_args.kwargs
+        self.assertEqual(kw.get('n_iterations'), 20)
+        self.assertNotIn('spacing_range', kw)
+        self.assertNotIn('seed', kw)  # None -> leave fimeval's default (random)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_bootstrap_without_params_keeps_fimeval_defaults(self, mock_eval):
+        # Pre-FE36 jobs (and tests) pass no bootstrap_params; fimeval's own
+        # defaults (100 / 500) must still apply, exactly as before.
+        self._stage_upload()
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'bootstrap', S3_CONFIG, sub_method='random')
+
+        kw = mock_eval.call_args.kwargs
+        for key in ('n_iterations', 'n_points', 'seed', 'spacing_range'):
+            self.assertNotIn(key, kw)
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
+    def test_non_bootstrap_ignores_bootstrap_params(self, mock_eval):
+        self._stage_upload()
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task(
+            'abc', '1', 'convex_hull', S3_CONFIG,
+            bootstrap_params={'n_iterations': 200, 'n_points': 1000,
+                              'spacing_range': [50, 500], 'seed': 42},
+        )
+
+        kw = mock_eval.call_args.kwargs
+        for key in ('n_iterations', 'n_points', 'seed', 'spacing_range'):
+            self.assertNotIn(key, kw)
+
+    def test_build_delayed_threads_bootstrap_params(self):
+        from tethysapp.fimeval_gui.job_types import REGISTRY
+        params = {'n_iterations': 7, 'n_points': 9, 'spacing_range': [1, 2], 'seed': 3}
+        with patch('tethysapp.fimeval_gui.job_types.evaluate_fim.run_evaluate_fim_task') as mock_task:
+            REGISTRY['evaluate_fim'].build_delayed(
+                upload_id='abc', user_id='1', method='bootstrap', s3_config=S3_CONFIG,
+                sub_method='random', bootstrap_params=params,
+            ).compute(scheduler='synchronous')
+        self.assertEqual(mock_task.call_args.kwargs.get('bootstrap_params'), params)
+
     @mock_aws
     @patch('fimeval.EvaluateFIM')
     def test_non_bootstrap_ignores_sub_method(self, mock_eval):
