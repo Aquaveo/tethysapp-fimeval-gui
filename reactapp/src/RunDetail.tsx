@@ -96,7 +96,7 @@ export default function RunDetail() {
   return (
     <div className="rd">
       <header className="rd-head">
-        <h2>Run #{id}{method ? ` · ${method}` : ''}</h2>
+        <h2>Run #{status?.run_number ?? id}{method ? ` · ${method}` : ''}</h2>
         {status && (
           <span className={`rd-status ${status.status}`}>{STATUS_LABEL[status.status]}</span>
         )}

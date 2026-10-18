@@ -1,6 +1,7 @@
 // reactapp/src/api.ts
-const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 import type { BootstrapParams } from './bootstrapParams';
+
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export interface UploadResult {
   upload_id: string;
@@ -213,6 +214,7 @@ export interface JobInputs {
 
 export interface JobStatus {
   job_id: number;
+  run_number?: number | null;
   status: 'submitted' | 'queued' | 'running' | 'complete' | 'error';
   created: string | null;
   completed: string | null;

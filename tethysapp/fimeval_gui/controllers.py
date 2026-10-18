@@ -758,6 +758,13 @@ _TETHYS_TO_STATUS = {
 }
 
 
+def _run_numbers(jobs, user):
+    """Per-user run number (oldest = 1) keyed by job id. The shared
+    tethys_compute_tethysjob PK is global, so it can't be the visible label."""
+    ids = sorted(j.id for j in jobs if getattr(j, 'user', None) == user)
+    return {jid: n for n, jid in enumerate(ids, start=1)}
+
+
 def _list_user_jobs(request):
     """GET ``api/jobs``: the requesting user's evaluations, newest first, for the
     Runs list. A read over the persisted Tethys ``DaskJob`` records — filtered to
@@ -794,11 +801,9 @@ def _list_user_jobs(request):
             # FE56: label each run with its owning user (runs are per-user).
             'username': getattr(getattr(j, 'user', None), 'username', None),
         })
-    # Number runs per user (oldest = 1). The shared tethys_compute_tethysjob PK
-    # is global, so keying the label off job_id makes a new user's first run show
-    # as e.g. #4; a rank over the user's own jobs keeps it 1-based.
-    for n, r in enumerate(sorted(out, key=lambda r: r['job_id']), start=1):
-        r['run_number'] = n
+    numbers = _run_numbers(jobs, request.user)
+    for r in out:
+        r['run_number'] = numbers.get(r['job_id'])
     out.sort(key=lambda r: r['job_id'], reverse=True)
     return JsonResponse({'jobs': out})
 
@@ -953,8 +958,18 @@ def api_job_status(request, job_id):
         except (ClientError, BotoCoreError, KeyError, ValueError) as exc:
             logger.debug('No inputs.json for job %s: %s', job_id, exc)
 
+    # Same per-user label as the Runs list, so "#1" there opens "Run #1" here.
+    run_number = None
+    try:
+        run_number = _run_numbers(
+            App.get_job_manager().list_jobs(user=request.user), request.user
+        ).get(job.id)
+    except Exception as exc:
+        logger.warning('Run number lookup failed for job %s: %s', job_id, exc)
+
     return JsonResponse({
         'job_id': job.id,
+        'run_number': run_number,
         'status': status,
         'created': job.creation_time.isoformat() if job.creation_time else None,
         'completed': job.completion_time.isoformat() if job.completion_time else None,

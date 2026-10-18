@@ -5,7 +5,7 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-S3_KEY_PREFIX = os.environ.get('FIMEVAL_S3_KEY_PREFIX', '/')
+S3_KEY_PREFIX = os.environ.get('FIMEVAL_S3_KEY_PREFIX', '')
 
 
 class S3Storage:

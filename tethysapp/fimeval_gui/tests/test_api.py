@@ -1073,6 +1073,31 @@ class TestJobsListEndpoint(TethysTestCase):
         out = json.loads(response.content)['jobs']
         self.assertEqual({r['job_id']: r['run_number'] for r in out}, {7: 1, 9: 2, 12: 3})
 
+    def test_status_run_number_matches_list(self):
+        # The detail endpoint labels a run with the same per-user number as the list.
+        from tethys_sdk.jobs import DaskJob
+        from django.utils import timezone
+        jobs = []
+        for jid in (7, 9, 12):
+            job = MagicMock(spec=DaskJob)
+            job.id = jid
+            job.key = None
+            job._status = 'SUB'
+            job.user = self.user
+            job.creation_time = timezone.now()
+            job.completion_time = None
+            job.extended_properties = self._props(f'uid{jid}')
+            jobs.append(job)
+        mock_storage = MagicMock()
+        mock_storage.etag.side_effect = lambda k: None
+        with patch('tethysapp.fimeval_gui.controllers.App') as MockApp, \
+             patch('tethysapp.fimeval_gui.controllers._get_storage', return_value=mock_storage), \
+             patch('tethysapp.fimeval_gui.controllers._get_owned_job', return_value=(jobs[1], None)):
+            MockApp.get_job_manager.return_value.list_jobs.return_value = jobs
+            response = self.client.get('/apps/fimeval-gui/api/jobs/9/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['run_number'], 2)
+
     def test_list_resolves_complete_from_success_marker(self):
         job = self._make_job(self._props('uidL', method='bootstrap', sub_method='systematic'))
         jobs = self._list(job, [f'outputs/{self.user.id}/uidL/_SUCCESS'])
