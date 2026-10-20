@@ -695,6 +695,7 @@ def api_jobs_submit(request):
         'access_key': App.get_custom_setting('minio_access_key'),
         'secret_key': App.get_custom_setting('minio_secret_key'),
         'bucket': App.get_custom_setting('s3_bucket'),
+        'key_prefix': S3_KEY_PREFIX,
     }
 
     try:
