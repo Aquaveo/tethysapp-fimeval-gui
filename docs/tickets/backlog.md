@@ -50,7 +50,7 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE33 | not started | ~1.5 d |
 | FE34 | not started | ~2–3 d |
 | FE35 | not started (was FE16) | ~1.5–2 d |
-| FE36 | 🔍 in review (PR #24) | ~2 d |
+| FE36 | ✅ done (PR #24, merged 2026-10-15; guide section on `docs/fe36-guide`) | ~2 d |
 | BE36 | ✅ done (PR #14) | ~1 d |
 | BE37 | ✅ done (PR #14) | ~1.5 d |
 | BE38 | ✅ done (PR #14) | ~0.25 d |
@@ -60,12 +60,12 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE39 | not started | ~0.5 d |
 | FE40 | ✅ done (PR #14) | ~1 d |
 | FE41 | ✅ done (PR #14) | ~1 d |
-| FE42 | not started | ~2–3 d |
-| FE43 | not started | ~1–2 d |
+| FE42 | built (UI slice stashed on `feat/folder-zip-upload`), awaiting manual test | ~2–3 d |
+| FE43 | built (with FE42), awaiting manual test | ~1–2 d |
 | FE44 | ✅ done (PR #14) | ~1 d |
 | FE45 | not started | ~1–1.5 d |
 | FE46 | not started | ~2–3 d |
-| BE40 | not started | ~1 d |
+| BE40 | not started (handed to us by Gio in PR #22 review) | ~1 d |
 | BE41 | not started | ~5–7 d |
 | BE42 | not started | ~1 d |
 | FE48 | not started | ~1–1.5 d |
@@ -83,16 +83,20 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE56 | ✅ done (PR #23) | ~3 h |
 | BE47 | ✅ done (PR #23) | ~2 h |
 | BE49 | built, awaiting manual test (branch `feat/be49-shapefile-bundle`) | ~3 h |
-| FE60 | built, awaiting manual test (branch `feat/fe60-boxplot-counts`) | ~1.5 h |
-| FE57 | 🔍 in review (PR #25) | ~2 h |
+| FE60 | built (branch `feat/fe60-boxplot-counts`), on the 2026-10-22 demo build, awaiting manual test | ~1.5 h |
+| FE57 | 🔍 in review (PR #25); manual test passed 2026-10-15 | ~2 h |
 | FE58 + BE48 | not started | ~8 h |
-| FE59 | not started | ~1 h |
+| FE59 | built (branch `feat/fe59-sidebar-buttons`), on the 2026-10-22 demo build, awaiting visual check | ~1 h |
 
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
 and FE25 + its backend storage-layout (~3–4 d). Most other open tickets are ≤1–2 d
 each. (FE55 + BE46 merged via PR #19/#18; FE47 merged via PR #21; bootstrap median
-name-aliases merged via PR #20; FE56 + BE47 in review as PR #23.)
+name-aliases merged via PR #20; FE56 + BE47 merged via PR #23; FE36 merged via PR #24.)
+
+> Tracker sync 2026-10-20: every ticket through FE60 / BE49 (plus BE35) now exists in
+> OpenProject, filed from the bodies below. FE61 and FE62 exist there as rejected
+> duplicates of FE48 / FE42, so the next free numbers are **FE63 / BE50**.
 
 > Status column reconciled 2026-09-10 — several rows still marked "not started" had
 > shipped in PR #14/#15/#16. Estimates are legacy dev-days; new estimates are given
