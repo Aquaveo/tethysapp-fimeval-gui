@@ -2,6 +2,7 @@
 // FIM-family branded header (matches FIMbench's chrome): logo + title + tagline,
 // and a Documentation link. Rendered by AppShell.
 import { Link, NavLink } from 'react-router-dom';
+import { STATIC_IMAGES } from './static';
 
 export default function Header() {
   return (
@@ -9,7 +10,7 @@ export default function Header() {
       <Link className="wk-brand" to="/new">
         <img
           className="wk-brand-logo"
-          src="/static/fimeval_gui/images/android-chrome-512x512.png"
+          src={`${STATIC_IMAGES}/android-chrome-512x512.png`}
           alt="FIMeval logo"
         />
         <span>

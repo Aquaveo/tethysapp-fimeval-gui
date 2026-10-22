@@ -21,6 +21,10 @@
     {# FE56: the SPA reads the signed-in user's name for the sidebar's "Signed in as" label. #}
     <div id="root" data-username="{{ request.user.username }}"></div>
 
+    <script>
+      window.STATIC_IMAGES_BASE = "{% static tethys_app|public:'images/' %}";
+    </script>
+
     <!-- React JS bundle -->
     <script type="module"
             src="{% static tethys_app|public:'frontend/main.js' %}">

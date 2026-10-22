@@ -50,6 +50,22 @@ class TestEvaluateFIMBuildDelayed(unittest.TestCase):
 class TestRunEvaluateFIMTask(unittest.TestCase):
     @mock_aws
     @patch('fimeval.EvaluateFIM')
+    def test_key_prefix_from_s3_config(self, mock_eval):
+        # The worker reads and writes under the prefix the web process sent,
+        # not its own env, so status lookups always find the markers.
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.create_bucket(Bucket=BUCKET)
+        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/benchmark.tif', Body=b'b')
+        s3.put_object(Bucket=BUCKET, Key='fimeval/uploads/1/abc/candidate_0.tif', Body=b'c')
+        mock_eval.side_effect = lambda main_dir, method, output_dir, **kw: _emit_success_outputs(output_dir)
+
+        from tethysapp.fimeval_gui.job_types.evaluate_fim import run_evaluate_fim_task
+        run_evaluate_fim_task('abc', '1', 'smallest_extent', {**S3_CONFIG, 'key_prefix': 'fimeval/'})
+
+        s3.head_object(Bucket=BUCKET, Key='fimeval/outputs/1/abc/_SUCCESS')
+
+    @mock_aws
+    @patch('fimeval.EvaluateFIM')
     def test_downloads_inputs_runs_fimeval_uploads_outputs(self, mock_eval):
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket=BUCKET)

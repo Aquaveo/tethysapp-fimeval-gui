@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
 export default defineConfig(({ mode }) => ({
-  // BASE URL: dev = '/', production = Tethys app URL
-  base: mode === 'production' ? '/apps/fimeval-gui/' : '/',
-
+  // Tethys portal serves the app at /apps/fimeval-gui/; the standalone image
+  // builds with VITE_BASE_URL=/. Dev serves at / and proxies to Django.
+  base: process.env.VITE_BASE_URL || (mode === 'production' ? '/apps/fimeval-gui/' : '/'),
   plugins: [
     react(),
   ],
@@ -38,6 +38,12 @@ export default defineConfig(({ mode }) => ({
 
   server: {
     proxy: {
+      // API_BASE is /api in dev; Django serves it under the app path.
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        rewrite: (p) => `/apps/fimeval-gui${p}`,
+      },
       '/apps': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

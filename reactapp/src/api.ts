@@ -1,6 +1,7 @@
 // reactapp/src/api.ts
 import type { BootstrapParams } from './bootstrapParams';
-const API_BASE = '/apps/fimeval-gui/api';
+
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export interface UploadResult {
   upload_id: string;
@@ -213,6 +214,7 @@ export interface JobInputs {
 
 export interface JobStatus {
   job_id: number;
+  run_number?: number | null;
   status: 'submitted' | 'queued' | 'running' | 'complete' | 'error';
   created: string | null;
   completed: string | null;
@@ -235,6 +237,7 @@ export async function getJobStatus(jobId: number): Promise<JobStatus> {
 // A row in the user's run history (GET api/jobs, BE34), for the Runs list.
 export interface Job {
   job_id: number;
+  run_number?: number;
   method: string | null;
   sub_method: string | null;
   bootstrap_params: BootstrapParams | null;
