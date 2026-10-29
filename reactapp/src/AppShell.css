@@ -131,6 +131,16 @@
 .wk-nav-item.is-active { background: rgba(18, 52, 88, 0.16); color: var(--chrome-2); font-weight: 600; }
 /* Sits at the sidebar's bottom, over the FilterSidebar white swoosh → dark text. */
 .wk-nav-foot { margin-top: auto; font-size: 0.72rem; color: var(--color-text); font-weight: 600; padding: 0.5rem; }
+/* FE57: "Sign out" sits on its own line under "Signed in as", in the same navy as
+   the utility links above it. */
+.wk-nav-signout {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--chrome-2);
+  font-weight: 600;
+  text-decoration: none;
+}
+.wk-nav-signout:hover { text-decoration: underline; }
 
 .wk-detail {
   flex: 1 1 auto;
