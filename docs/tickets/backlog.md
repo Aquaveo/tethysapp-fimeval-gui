@@ -87,8 +87,12 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE57 | 🔍 in review (PR #25); manual test passed 2026-10-15 | ~2 h |
 | FE58 + BE48 | not started | ~8 h |
 | FE59 | 🔍 in review (PR #26); visual check passed 2026-10-27 | ~1 h |
-| BE51 | not started — login gating + `never_cache` on home so Back after sign-out shows no anonymous shell | ~1 h |
-| FE64 | not started — Runs list refetches on submit instead of waiting for the next poll | ~2 h |
+| BE51 | 🔍 in review (PR #28); tested 2026-10-29 | 1 h |
+| FE64 | 🔍 in review (PR #29); tested 2026-10-29 | 2 h |
+| BE50 | profiling DONE 2026-10-29 → `docs/specs/be50-web-vs-desktop-profile.md` (web faster only via BE31 pre-clip; metrics identical) | 8 h |
+| BE52 | not started — FIMbench→FIMeval handoff handler + S3→MinIO benchmark staging (tracker #23692) | 8 h |
+| BE53 | not started — append candidates/boundary to an existing upload_id (tracker #23693) | 6 h |
+| FE65 | not started — pre-staged benchmark UI for the handoff (tracker #23694) | 8 h |
 | FE63 | not started — results table lists TP/FP/FN/TN first | ~2 h |
 | BE50 | not started — profile web-app vs desktop speed | ~8 h |
 
@@ -101,7 +105,7 @@ name-aliases merged via PR #20; FE56 + BE47 merged via PR #23; FE36 merged via P
 > Tracker sync 2026-10-27: every ticket through FE64 / BE51 (plus BE35) now exists in
 > OpenProject. FE61 and FE62 are Reshma's duplicates of FE48 / FE42. BE50, BE51, FE63
 > and FE64 were filed 2026-10-27 from the 22 October demo notes (tracker #23588,
-> #23589, #23587, #23590). The next free numbers are **FE65 / BE52**. Shipped tickets
+> #23589, #23587, #23590). BE52, BE53 and FE65 (FIMbench handoff, spec `docs/specs/fimbench-fimeval-handoff.md`) were filed 2026-10-29. The next free numbers are **FE66 / BE54**. Shipped tickets
 > were audited the same day: all Closed with hour estimates and 100 %.
 
 > Status column reconciled 2026-09-10 — several rows still marked "not started" had
