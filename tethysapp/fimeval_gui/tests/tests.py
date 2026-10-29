@@ -26,3 +26,24 @@ class TestCase(TethysTestCase):
         response = c.get('/apps/fimeval-gui/')
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'data-username="erin"', response.content)
+
+    def test_home_redirects_anonymous_to_login(self):
+        # BE51: the SPA shell must never render for an anonymous request, so the
+        # browser's Back button after sign-out cannot land on a user-less workspace.
+        c = self.get_test_client()
+        response = c.get('/apps/fimeval-gui/')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('login', response['Location'])
+
+    def test_home_is_never_cached(self):
+        # BE51: without no-store the browser serves the signed-in shell from its
+        # cache on Back after sign-out, showing "Signed in as <user>" with no runs.
+        c = self.get_test_client()
+        user = self.create_test_user(
+            username='kim', password='secret', email='kim@example.com'
+        )
+        c.force_login(user)
+
+        response = c.get('/apps/fimeval-gui/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response.get('Cache-Control', ''))

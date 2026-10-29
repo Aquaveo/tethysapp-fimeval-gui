@@ -2199,11 +2199,18 @@ class TestListJobsEndpoint(TethysTestCase):
         super().setUp()
         self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
         self.mock_app = self.app_patcher.start()
+        # The list resolves every non-terminal job against the worker's S3 markers
+        # (_resolve_marker_status). With App mocked, a real S3 client can't be built
+        # from the mock settings, so stub storage with no markers present: a 'RUN'
+        # job then stays 'running' on its (fresh) creation time.
+        self.storage_patcher = patch('tethysapp.fimeval_gui.controllers._get_storage')
+        self.storage_patcher.start().return_value.etag.return_value = None
         self.user = self.create_test_user(username='lister', password='pw', email='l@b.com')
         self.client = self.get_test_client()
         self.client.force_login(self.user)
 
     def tearDown(self):
+        self.storage_patcher.stop()
         self.app_patcher.stop()
         super().tearDown()
 

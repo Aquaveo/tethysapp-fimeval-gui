@@ -14,6 +14,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
 from django.http import FileResponse, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
@@ -66,8 +67,16 @@ def _get_owned_job(request, job_id):
 
 
 @controller(login_required=True)
+@never_cache
 def home(request):
-    """App home page (SPA catch-all); login-gated so expired sessions redirect to sign-in."""
+    """App home page (SPA catch-all); login-gated so expired sessions redirect to sign-in.
+
+    ``never_cache`` (BE51): the shell is rendered per user ("Signed in as …"), so it
+    must not be served from the browser cache. Without ``no-store`` the Back button
+    after sign-out restores the stale shell, whose API calls then fail as anonymous
+    (empty Runs list, no user). With it, Back re-requests the page and the
+    ``login_required`` redirect takes the user to sign-in instead.
+    """
     return App.render(request, 'index.html')
 
 
