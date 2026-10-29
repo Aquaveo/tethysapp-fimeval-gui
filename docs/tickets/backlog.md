@@ -83,10 +83,14 @@ warranted (historical); the numbers to plan around are the not-started ones.
 | FE56 | ✅ done (PR #23) | ~3 h |
 | BE47 | ✅ done (PR #23) | ~2 h |
 | BE49 | built, awaiting manual test (branch `feat/be49-shapefile-bundle`) | ~3 h |
-| FE60 | built (branch `feat/fe60-boxplot-counts`), on the 2026-10-22 demo build, awaiting manual test | ~1.5 h |
+| FE60 | 🔍 in review (PR #27); manual test passed 2026-10-27 | ~2 h |
 | FE57 | 🔍 in review (PR #25); manual test passed 2026-10-15 | ~2 h |
 | FE58 + BE48 | not started | ~8 h |
-| FE59 | built (branch `feat/fe59-sidebar-buttons`), on the 2026-10-22 demo build, awaiting visual check | ~1 h |
+| FE59 | 🔍 in review (PR #26); visual check passed 2026-10-27 | ~1 h |
+| BE51 | not started — login gating + `never_cache` on home so Back after sign-out shows no anonymous shell | ~1 h |
+| FE64 | not started — Runs list refetches on submit instead of waiting for the next poll | ~2 h |
+| FE63 | not started — results table lists TP/FP/FN/TN first | ~2 h |
+| BE50 | not started — profile web-app vs desktop speed | ~8 h |
 
 **Remaining, worst-case:** the big not-started items are BE43/BE44 (desktop parity,
 ~5–7 d + ~2–3 d), BE41 (WebSocket job status, ~5–7 d), BE39 (repro memory, ~3–4 d),
@@ -94,9 +98,11 @@ and FE25 + its backend storage-layout (~3–4 d). Most other open tickets are �
 each. (FE55 + BE46 merged via PR #19/#18; FE47 merged via PR #21; bootstrap median
 name-aliases merged via PR #20; FE56 + BE47 merged via PR #23; FE36 merged via PR #24.)
 
-> Tracker sync 2026-10-20: every ticket through FE60 / BE49 (plus BE35) now exists in
-> OpenProject, filed from the bodies below. FE61 and FE62 exist there as rejected
-> duplicates of FE48 / FE42, so the next free numbers are **FE63 / BE50**.
+> Tracker sync 2026-10-27: every ticket through FE64 / BE51 (plus BE35) now exists in
+> OpenProject. FE61 and FE62 are Reshma's duplicates of FE48 / FE42. BE50, BE51, FE63
+> and FE64 were filed 2026-10-27 from the 22 October demo notes (tracker #23588,
+> #23589, #23587, #23590). The next free numbers are **FE65 / BE52**. Shipped tickets
+> were audited the same day: all Closed with hour estimates and 100 %.
 
 > Status column reconciled 2026-09-10 — several rows still marked "not started" had
 > shipped in PR #14/#15/#16. Estimates are legacy dev-days; new estimates are given
