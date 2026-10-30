@@ -9,6 +9,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import type { EChartsOption } from 'echarts';
 import type { BootstrapStats, BoxStat } from './api';
+import { plotMetrics } from './bootstrapMetrics';
 import './BootstrapBoxPlots.css';
 
 // Tree-shaken ECharts: register only what the box plots need so we don't pull
@@ -113,6 +114,10 @@ function downloadChartPng(inst: ChartInstance, filename: string) {
 
 function BootstrapBoxPlots({ data }: Props) {
   const instances = useRef<Record<string, ChartInstance>>({});
+  // FE60: count classes (TP/FP/FN/TN) are left out of the plots; the medians
+  // table below still shows them.
+  const metrics = plotMetrics(data.metrics);
+  if (metrics.length === 0) return null;
   return (
     <div className="results-panel">
       <div className="results-panel-title">
@@ -139,7 +144,7 @@ function BootstrapBoxPlots({ data }: Props) {
           </div>
           <ReactEChartsCore
             echarts={echarts}
-            option={chartOption(data.metrics, data.stats[cand] ?? {})}
+            option={chartOption(metrics, data.stats[cand] ?? {})}
             style={{ height: 300 }}
             opts={{ renderer: 'svg' }}
             onChartReady={(inst: ChartInstance) => { instances.current[cand] = inst; }}
