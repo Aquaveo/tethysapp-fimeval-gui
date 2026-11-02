@@ -41,3 +41,20 @@ export function bootstrapMedian(
   }
   return null;
 }
+
+// FE60: the raw contingency counts (TP/FP/FN/TN) are pixel counts, several
+// orders of magnitude above the 0–1 scores, so plotting them flattens every
+// score box to a line. They stay in the medians table (BE46) but not the plots.
+const COUNT_CLASSES = new Set([
+  'tp', 'fp', 'fn', 'tn',
+  'true positive', 'false positive', 'false negative', 'true negative',
+]);
+
+export function isCountClass(name: string): boolean {
+  return COUNT_CLASSES.has(name.trim().toLowerCase().replace(/[_-]+/g, ' '));
+}
+
+// The metrics worth box-plotting, in their original order.
+export function plotMetrics(metrics: string[]): string[] {
+  return metrics.filter((m) => !isCountClass(m));
+}

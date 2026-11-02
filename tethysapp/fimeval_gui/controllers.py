@@ -14,11 +14,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 from distributed import Client, Future
 from django.http import FileResponse, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from tethys_sdk.jobs import DaskJob
 from tethys_sdk.routing import controller
 
 from tethysapp.fimeval_gui.app import App
+from tethysapp.fimeval_gui.storage import S3_KEY_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,13 @@ def _output_prefix(user_id, upload_id, run_id=None):
     """S3 prefix for a run's outputs. Runs are namespaced by ``run_id`` so
     re-evaluating the same upload doesn't collide with (or read back) a prior
     run's results; legacy runs (no run_id) fall back to the flat prefix."""
-    base = f'outputs/{user_id}/{upload_id}/'
+    base = f'{S3_KEY_PREFIX}outputs/{user_id}/{upload_id}/'
     return f'{base}{run_id}/' if run_id else base
+
+
+def _upload_prefix(user_id, upload_id):
+    """S3 prefix for a job's uploaded inputs."""
+    return f'{S3_KEY_PREFIX}uploads/{user_id}/{upload_id}/'
 
 
 def _get_owned_job(request, job_id):
@@ -59,9 +66,17 @@ def _get_owned_job(request, job_id):
     return job, None
 
 
-@controller(login_required=False)
+@controller(login_required=True)
+@never_cache
 def home(request):
-    """Controller for the app home page (SPA catch-all)."""
+    """App home page (SPA catch-all); login-gated so expired sessions redirect to sign-in.
+
+    ``never_cache`` (BE51): the shell is rendered per user ("Signed in as …"), so it
+    must not be served from the browser cache. Without ``no-store`` the Back button
+    after sign-out restores the stale shell, whose API calls then fail as anonymous
+    (empty Runs list, no user). With it, Back re-requests the page and the
+    ``login_required`` redirect takes the user to sign-in instead.
+    """
     return App.render(request, 'index.html')
 
 
@@ -312,12 +327,12 @@ def api_upload(request):
     storage = _get_storage()
 
     try:
-        benchmark_key = f'uploads/{user_id}/{upload_id}/benchmark.tif'
+        benchmark_key = _upload_prefix(user_id, upload_id) + 'benchmark.tif'
         storage.upload_fileobj(benchmark_file, benchmark_key)
 
         candidate_keys = []
         for i, cfile in enumerate(candidate_files):
-            key = f'uploads/{user_id}/{upload_id}/candidate_{i}.tif'
+            key = _upload_prefix(user_id, upload_id) + f'candidate_{i}.tif'
             storage.upload_fileobj(cfile, key)
             candidate_keys.append(key)
 
@@ -326,7 +341,7 @@ def api_upload(request):
         boundary_keys = []
         for bfile in boundary_files:
             name = os.path.basename(bfile.name)
-            key = f'uploads/{user_id}/{upload_id}/boundary/{name}'
+            key = _upload_prefix(user_id, upload_id) + f'boundary/{name}'
             storage.upload_fileobj(bfile, key)
             boundary_keys.append(key)
     except (ClientError, BotoCoreError) as exc:
@@ -392,7 +407,7 @@ def api_upload_presign(request):
 
     upload_id = str(uuid.uuid4())
     user_id = str(request.user.id)
-    prefix = f'uploads/{user_id}/{upload_id}/'
+    prefix = _upload_prefix(user_id, upload_id)
     storage = _get_storage()
 
     try:
@@ -441,6 +456,57 @@ VALID_METHODS = {'convex_hull', 'bootstrap', 'intersected_extent', 'AOI'}
 # Bootstrap sampling approaches fimeval's run_bootstrap accepts (BE36).
 VALID_SUB_METHODS = {'random', 'systematic', 'stratified'}
 
+# FE36: advanced bootstrap parameters. Names mirror fimeval's EvaluateFIM /
+# run_bootstrap kwargs so nothing is renamed on the way through. Defaults are
+# fimeval's own (n_iterations/n_points) and its documented systematic example
+# (spacing_range). The caps bound worker cost, which scales with
+# n_iterations × n_points.
+BOOTSTRAP_DEFAULTS = {
+    'n_iterations': 100,
+    'n_points': 500,
+    'spacing_range': [100, 1000],
+    'seed': None,
+}
+MAX_N_ITERATIONS = 1000
+MAX_N_POINTS = 50000
+
+
+def _is_int(v):
+    # bool is an int subclass; a JSON ``true`` must not pass as 1.
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_number(v):
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and not math.isnan(v) and not math.isinf(v))
+
+
+def _parse_bootstrap_params(body):
+    """Validate the optional bootstrap knobs in a submit body.
+
+    Returns ``(params, None)`` with every key present (defaults filled in), or
+    ``(None, message)`` naming the offending field.
+    """
+    params = dict(BOOTSTRAP_DEFAULTS)
+    for key, cap in (('n_iterations', MAX_N_ITERATIONS), ('n_points', MAX_N_POINTS)):
+        if key in body and body[key] is not None:
+            v = body[key]
+            if not _is_int(v) or not 1 <= v <= cap:
+                return None, f'{key} must be an integer between 1 and {cap}'
+            params[key] = v
+    if 'spacing_range' in body and body['spacing_range'] is not None:
+        sr = body['spacing_range']
+        if (not isinstance(sr, (list, tuple)) or len(sr) != 2
+                or not all(_is_number(x) for x in sr)
+                or sr[0] <= 0 or sr[0] >= sr[1]):
+            return None, 'spacing_range must be [min, max] in metres with 0 < min < max'
+        params['spacing_range'] = [sr[0], sr[1]]
+    if 'seed' in body and body['seed'] is not None:
+        if not _is_int(body['seed']):
+            return None, 'seed must be an integer'
+        params['seed'] = body['seed']
+    return params, None
+
 # Control-plane objects the worker writes to the output prefix (terminal markers
 # + the input-metadata file + the internal contingency tiling COG); not
 # user-facing output files.
@@ -461,8 +527,11 @@ def _contingency_cog_src(user_id, upload_id, run_id=None):
     """rio-tiler source for a job's contingency COG. Production reads it from S3
     via GDAL /vsis3 with the app's S3 credentials in the environment."""
     import os as _os
-    _os.environ.setdefault('AWS_ACCESS_KEY_ID', App.get_custom_setting('minio_access_key') or '')
-    _os.environ.setdefault('AWS_SECRET_ACCESS_KEY', App.get_custom_setting('minio_secret_key') or '')
+    access_key = App.get_custom_setting('minio_access_key')
+    secret_key = App.get_custom_setting('minio_secret_key')
+    if access_key and secret_key:
+        _os.environ.setdefault('AWS_ACCESS_KEY_ID', access_key)
+        _os.environ.setdefault('AWS_SECRET_ACCESS_KEY', secret_key)
     endpoint = App.get_custom_setting('minio_endpoint_url')
     if endpoint:
         _os.environ['AWS_S3_ENDPOINT'] = endpoint.replace('http://', '').replace('https://', '')
@@ -508,12 +577,19 @@ def api_jobs_submit(request):
             {'error': f'sub_method must be one of {sorted(VALID_SUB_METHODS)}'},
             status=400,
         )
+    # FE36: advanced bootstrap knobs. Parsed only for bootstrap; the other
+    # methods ignore them and store nothing.
+    bootstrap_params = None
+    if method == 'bootstrap':
+        bootstrap_params, err = _parse_bootstrap_params(body)
+        if err:
+            return JsonResponse({'error': err}, status=400)
 
     user_id = str(request.user.id)
     storage = _get_storage()
 
     try:
-        sizes = dict(storage.list_prefix_with_sizes(f'uploads/{user_id}/{upload_id}/'))
+        sizes = dict(storage.list_prefix_with_sizes(_upload_prefix(user_id, upload_id)))
     except (ClientError, BotoCoreError) as exc:
         logger.error('S3 check failed for upload_id=%s: %s', upload_id, exc)
         return JsonResponse({'error': 'storage unavailable'}, status=503)
@@ -525,7 +601,7 @@ def api_jobs_submit(request):
     # is the only server-side proof the files actually landed: confirm the
     # benchmark and at least one candidate exist and are non-empty (a silently
     # failed/expired PUT would otherwise submit a job that dies on the worker).
-    prefix = f'uploads/{user_id}/{upload_id}/'
+    prefix = _upload_prefix(user_id, upload_id)
 
     def _basename(key):
         return key.rsplit('/', 1)[-1]
@@ -628,6 +704,7 @@ def api_jobs_submit(request):
         'access_key': App.get_custom_setting('minio_access_key'),
         'secret_key': App.get_custom_setting('minio_secret_key'),
         'bucket': App.get_custom_setting('s3_bucket'),
+        'key_prefix': S3_KEY_PREFIX,
     }
 
     try:
@@ -653,11 +730,13 @@ def api_jobs_submit(request):
         'method': method,
         'target_resolution': target_resolution,
         'sub_method': sub_method,
+        'bootstrap_params': bootstrap_params,
         'run_id': run_id,
     }
     delayed = REGISTRY['evaluate_fim'].build_delayed(
         upload_id=upload_id, user_id=user_id, method=method, s3_config=s3_config,
-        target_resolution=target_resolution, sub_method=sub_method, run_id=run_id,
+        target_resolution=target_resolution, sub_method=sub_method,
+        bootstrap_params=bootstrap_params, run_id=run_id,
     )
 
     try:
@@ -689,6 +768,13 @@ _TETHYS_TO_STATUS = {
 }
 
 
+def _run_numbers(jobs, user):
+    """Per-user run number (oldest = 1) keyed by job id. The shared
+    tethys_compute_tethysjob PK is global, so it can't be the visible label."""
+    ids = sorted(j.id for j in jobs if getattr(j, 'user', None) == user)
+    return {jid: n for n, jid in enumerate(ids, start=1)}
+
+
 def _list_user_jobs(request):
     """GET ``api/jobs``: the requesting user's evaluations, newest first, for the
     Runs list. A read over the persisted Tethys ``DaskJob`` records — filtered to
@@ -718,12 +804,16 @@ def _list_user_jobs(request):
             'job_id': j.id,
             'method': props.get('method'),
             'sub_method': props.get('sub_method'),
+            'bootstrap_params': props.get('bootstrap_params'),
             'status': status,
             'created': created.isoformat() if created else None,
             'upload_id': props.get('upload_id'),
             # FE56: label each run with its owning user (runs are per-user).
             'username': getattr(getattr(j, 'user', None), 'username', None),
         })
+    numbers = _run_numbers(jobs, request.user)
+    for r in out:
+        r['run_number'] = numbers.get(r['job_id'])
     out.sort(key=lambda r: r['job_id'], reverse=True)
     return JsonResponse({'jobs': out})
 
@@ -878,13 +968,24 @@ def api_job_status(request, job_id):
         except (ClientError, BotoCoreError, KeyError, ValueError) as exc:
             logger.debug('No inputs.json for job %s: %s', job_id, exc)
 
+    # Same per-user label as the Runs list, so "#1" there opens "Run #1" here.
+    run_number = None
+    try:
+        run_number = _run_numbers(
+            App.get_job_manager().list_jobs(user=request.user), request.user
+        ).get(job.id)
+    except Exception as exc:
+        logger.warning('Run number lookup failed for job %s: %s', job_id, exc)
+
     return JsonResponse({
         'job_id': job.id,
+        'run_number': run_number,
         'status': status,
         'created': job.creation_time.isoformat() if job.creation_time else None,
         'completed': job.completion_time.isoformat() if job.completion_time else None,
         'method': props.get('method'),
         'sub_method': props.get('sub_method'),
+        'bootstrap_params': props.get('bootstrap_params'),
         'upload_id': props.get('upload_id'),
         'reason': reason,
         'inputs': inputs,
@@ -911,16 +1012,13 @@ def api_job_tilejson(request, job_id):
     except Exception as exc:
         logger.info('No contingency tilejson for job %s: %s', job_id, exc)
         return JsonResponse({'error': 'no contingency map'}, status=404)
-    # rio-tiler swallows a failed CRS transform and hands back whole-world bounds
-    # + TMS zooms, which the viewer would render as a blank world map. Refuse
-    # instead (the panel hides) and log loudly so the cause gets fixed.
     if not all(math.isfinite(b) for b in bounds) or bounds == [-180.0, -90.0, 180.0, 90.0]:
         logger.error(
             'Contingency COG bounds for job %s could not be transformed to WGS84 '
             '(got %s); check PROJ_NETWORK / PROJ data. Source: %s', job_id, bounds, src,
         )
         return JsonResponse({'error': 'contingency map bounds unresolvable'}, status=404)
-    base = request.build_absolute_uri(f'/apps/fimeval-gui/api/jobs/{job_id}/tiles/')
+    base = request.build_absolute_uri(request.path.replace('tiles.json', 'tiles'))
     return JsonResponse({
         'tilejson': '2.2.0',
         'tiles': [base + '{z}/{x}/{y}.png/'],

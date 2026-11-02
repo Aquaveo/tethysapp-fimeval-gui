@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bootstrapMedian, normalizeMetric } from './bootstrapMetrics';
+import { bootstrapMedian, isCountClass, normalizeMetric, plotMetrics } from './bootstrapMetrics';
 import type { BootstrapStats, BoxStat } from './api';
 
 const stat = (median: number): BoxStat => ({
@@ -72,6 +72,43 @@ describe('normalizeMetric', () => {
   it('collapses TPR / POD / sen / Sensitivity / Recall → sensitivity', () => {
     for (const n of ['TPR', 'POD', 'sen', 'Sensitivity', 'Recall']) {
       expect(normalizeMetric(n)).toBe('sensitivity');
+    }
+  });
+});
+
+// FE60: the raw count classes (TP/FP/FN/TN) are on a pixel-count scale and
+// swamp the score metrics in the box plots, so they are dropped from the plots
+// only. The medians table keeps every column (BE46).
+describe('plotMetrics (FE60)', () => {
+  it('drops TP, FP, FN and TN and keeps the scores in CSV order', () => {
+    expect(plotMetrics(['TP', 'FP', 'FN', 'TN', 'CSI', 'POD', 'Accuracy', 'F1']))
+      .toEqual(['CSI', 'POD', 'Accuracy', 'F1']);
+  });
+
+  it('is case-insensitive about the count-class names', () => {
+    expect(plotMetrics(['tp', 'Fp', 'fN', 'tn', 'MCC'])).toEqual(['MCC']);
+  });
+
+  it('also drops the spelled-out count names', () => {
+    expect(plotMetrics(['True Positive', 'False Negative', 'Kappa'])).toEqual(['Kappa']);
+  });
+
+  it('leaves a list with no count classes untouched', () => {
+    expect(plotMetrics(['CSI', 'FAR'])).toEqual(['CSI', 'FAR']);
+  });
+
+  it('returns an empty list when only counts were bootstrapped', () => {
+    expect(plotMetrics(['TP', 'TN'])).toEqual([]);
+  });
+});
+
+describe('isCountClass', () => {
+  it('recognises the four count classes and nothing else', () => {
+    for (const n of ['TP', 'FP', 'FN', 'TN', 'true negative', 'False Positive']) {
+      expect(isCountClass(n)).toBe(true);
+    }
+    for (const n of ['CSI', 'FNR', 'FAR', 'TPR', 'POD']) {
+      expect(isCountClass(n)).toBe(false);
     }
   });
 });

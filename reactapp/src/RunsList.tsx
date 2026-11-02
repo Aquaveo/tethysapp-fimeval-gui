@@ -86,7 +86,7 @@ export default function RunsList() {
               onClick={() => navigate(`/runs/${j.job_id}`)}
             >
               <div className="run-top">
-                <span className="run-num">#{j.job_id}</span>
+                <span className="run-num">#{j.run_number ?? j.job_id}</span>
                 <span className={`pill ${st.cls}`}>{st.label}</span>
               </div>
               <div className="run-method">

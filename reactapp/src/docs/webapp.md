@@ -1,3 +1,14 @@
+### Bootstrap: Advanced parameters
+
+When the **Bootstrap** method is selected, the wizard shows an **Advanced parameters** panel. The defaults are fimeval's own and work for most case studies; change them only when you have a reason to.
+
+- **Iterations** (default **100**, max 1,000): how many times pixels are resampled. More iterations give smoother box-plots and take proportionally longer.
+- **Points per iteration** (default **500**, max 50,000): the sample size for the Random and Stratified approaches. Larger samples narrow the spread of each metric.
+- **Grid spacing min / max** (default **100–1,000 m**): for the Systematic approach only, the range from which each iteration's grid spacing is drawn.
+- **Random seed** (default blank): leave blank for a different random sample each run. Enter any whole number to make the run **reproducible**: two runs with the same inputs, approach and seed produce identical sampling CSVs and box-plots.
+
+The parameters used are recorded on the run's detail page and in the downloaded outputs, so a result can always be traced back to its settings.
+
 ### FAQs & Known Limitations
 
 This is a **lightweight (alpha) build**, tuned for quick, moderate-sized evaluations on shared infrastructure, so a few limits apply:

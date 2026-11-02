@@ -88,6 +88,30 @@
 .ne-mt { display: block; font-weight: 600; font-size: 0.9rem; }
 .ne-md { display: block; font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.15rem; }
 .ne-aoi { margin-top: 1rem; }
+/* FE36: advanced bootstrap parameters (collapsed by default). */
+.ne-advanced { margin-top: 0.8rem; }
+.ne-advanced > summary {
+  cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--color-text-muted);
+  user-select: none;
+}
+.ne-advanced[open] > summary { color: var(--color-text); }
+.ne-adv-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.6rem 0.9rem; margin-top: 0.6rem;
+}
+.ne-field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.ne-field > span:first-child { font-size: 0.78rem; font-weight: 600; color: var(--color-text-muted); }
+.ne-field[aria-disabled="true"] > span:first-child { opacity: 0.5; }
+.ne-field input {
+  font: inherit; font-size: 0.88rem; padding: 0.4rem 0.55rem; min-width: 0; width: 100%;
+  border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-surface); color: var(--color-text);
+}
+.ne-field input:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.ne-field input:disabled { opacity: 0.5; cursor: not-allowed; }
+.ne-field input[aria-invalid="true"] { border-color: #cc0000; }
+.ne-range { display: flex; align-items: center; gap: 0.4rem; }
+.ne-range input { flex: 1 1 0; }
 .ne-hint { margin: 0.5rem 0 0; font-size: 0.82rem; color: var(--color-text-muted); }
 .ne-hint-err { color: #cc0000; }
 

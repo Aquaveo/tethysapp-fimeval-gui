@@ -1,7 +1,9 @@
 // reactapp/src/Footer.tsx
 // FIM-family footer (matches FIMbench): MapLibre/Esri attribution, partner logos,
 // and copyright, over the Footer-HQ banner. Rendered by AppShell.
-const LOGO_BASE = '/static/fimeval_gui/images';
+import { STATIC_IMAGES } from './static';
+
+const LOGO_BASE = STATIC_IMAGES;
 
 const PARTNERS = [
   { src: '1_CIROH-Horizontal-Logo_AI-Canva-470x125px.png', alt: 'CIROH', href: 'https://ciroh.ua.edu/' },
