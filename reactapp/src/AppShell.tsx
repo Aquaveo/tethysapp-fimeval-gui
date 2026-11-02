@@ -21,6 +21,12 @@ function signedInUsername(): string {
   return document.getElementById('root')?.dataset.username ?? '';
 }
 
+// FE57: Tethys's logout route (a plain GET that ends the Django session and
+// redirects to the login page), injected by the template so it isn't hard-coded.
+function logoutUrl(): string {
+  return document.getElementById('root')?.dataset.logoutUrl ?? '';
+}
+
 function hideWelcomePref(): boolean {
   try {
     return localStorage.getItem(HIDE_WELCOME_KEY) === '1';
@@ -36,6 +42,7 @@ export default function AppShell() {
 
   const closeWelcome = () => setWelcomeOpen(false);
   const username = signedInUsername();
+  const signOutHref = logoutUrl();
 
   // The checkbox directly controls the persistent "hide on startup" preference.
   const changeDontShow = (v: boolean) => {
@@ -79,6 +86,10 @@ export default function AppShell() {
             </button>
             <div className="wk-nav-foot">
               Signed in{username && <> as <strong>{username}</strong></>}
+              {/* Full navigation (not a router Link) so the Django session really ends. */}
+              {signOutHref && (
+                <a className="wk-nav-signout" href={signOutHref}>Sign out</a>
+              )}
             </div>
           </div>
         </nav>
