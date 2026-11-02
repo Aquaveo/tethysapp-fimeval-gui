@@ -1,7 +1,8 @@
 // reactapp/src/RunsList.tsx
 // The persistent Runs column: the user's runs from GET api/jobs, click to open a
 // run's detail (/runs/:jobId), with the routed run highlighted. Polls while any
-// run is in progress.
+// run is in progress, and refetches at once on navigation to a run (FE64: the
+// wizard navigates to the new run the moment it's submitted, before the next poll).
 import { useEffect, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { fetchJobs, type Job } from './api';
@@ -40,29 +41,35 @@ export default function RunsList() {
   const navigate = useNavigate();
   const selectedId = useMatch('/runs/:jobId')?.params.jobId;
 
+  // Each run of this effect does one fetch and schedules the next via `tick`:
+  // fast while something is in flight, slowly otherwise. It is also keyed on
+  // the routed run (FE64), so navigating to a run — in particular the one the
+  // wizard just submitted — cancels the pending poll and fetches immediately.
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const load = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const next = (ms: number) => {
+      timer = setTimeout(() => setTick((t) => t + 1), ms);
+    };
+    (async () => {
       try {
         const j = await fetchJobs();
         if (cancelled) return;
         setJobs(j);
         setFailed(false);
-        // Poll faster while something is in flight, slowly otherwise.
-        timer = setTimeout(load, j.some((x) => isActive(x.status)) ? 3000 : 15000);
+        next(j.some((x) => isActive(x.status)) ? 3000 : 15000);
       } catch {
         if (cancelled) return;
         setFailed(true);
-        timer = setTimeout(load, 8000);
+        next(8000);
       }
-    };
-    load();
+    })();
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [tick, selectedId]);
 
   return (
     <div className="runs">
