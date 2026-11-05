@@ -1818,6 +1818,122 @@ class TestBootstrapEndpoint(TethysTestCase):
         self.assertEqual(response.status_code, 503)
 
 
+class TestPresignAppendToExistingUpload(TethysTestCase):
+    """FIMEVAL-BE53: POST /api/upload/presign with an ``upload_id`` adds candidates
+    (+ optional boundary) to an upload whose benchmark is already staged — the
+    FIMbench handoff (BE52) stages the benchmark first, then the SPA adds the rest."""
+
+    URL = '/apps/fimeval-gui/api/upload/presign/'
+
+    def setUp(self):
+        super().setUp()
+        self.mock_s3 = mock_aws()
+        self.mock_s3.start()
+        self.s3 = boto3.client('s3', region_name='us-east-1')
+        self.s3.create_bucket(Bucket=BUCKET)
+        self.app_patcher = patch('tethysapp.fimeval_gui.controllers.App')
+        self.mock_app = self.app_patcher.start()
+        self.mock_app.get_custom_setting.side_effect = _app_settings_side_effect
+        self.user = self.create_test_user(username='apnd', password='pw', email='a@b.com')
+        self.other = self.create_test_user(username='someone', password='pw', email='s@b.com')
+        self.client = self.get_test_client()
+        self.client.force_login(self.user)
+
+    def tearDown(self):
+        self.app_patcher.stop()
+        self.mock_s3.stop()
+        super().tearDown()
+
+    def _stage(self, user=None, upload_id=None, benchmark=True, candidates=0, names=None):
+        from tethysapp.fimeval_gui.controllers import _upload_prefix
+        user = user or self.user
+        upload_id = upload_id or str(uuid.uuid4())
+        prefix = _upload_prefix(str(user.id), upload_id)
+        if benchmark:
+            self.s3.put_object(Bucket=BUCKET, Key=prefix + 'benchmark.tif', Body=b'II*\x00')
+        for i in range(candidates):
+            self.s3.put_object(Bucket=BUCKET, Key=prefix + f'candidate_{i}.tif', Body=b'II*\x00')
+        manifest = {'names': names if names is not None else {'benchmark.tif': 'site 42'}, 'source': 'fimbench'}
+        self.s3.put_object(Bucket=BUCKET, Key=prefix + 'manifest.json', Body=json.dumps(manifest).encode())
+        return upload_id, prefix
+
+    def _post(self, body):
+        return self.client.post(self.URL, data=json.dumps(body), content_type='application/json')
+
+    def _manifest(self, prefix):
+        return json.loads(self.s3.get_object(Bucket=BUCKET, Key=prefix + 'manifest.json')['Body'].read())
+
+    def test_append_candidates_to_own_staged_upload(self):
+        upload_id, prefix = self._stage()
+        r = self._post({'upload_id': upload_id, 'candidates': ['hand_fim.tif', 'model_b.tif']})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = json.loads(r.content)
+        self.assertEqual(body['upload_id'], upload_id)
+        fields = [t['field'] for t in body['targets']]
+        self.assertEqual(fields, ['candidate', 'candidate'])
+        self.assertEqual([t['key'] for t in body['targets']],
+                         [prefix + 'candidate_0.tif', prefix + 'candidate_1.tif'])
+        for t in body['targets']:
+            self.assertIn('candidate_', t['url'])
+        m = self._manifest(prefix)
+        self.assertEqual(m['names']['benchmark.tif'], 'site 42')   # merged, not overwritten
+        self.assertEqual(m['names']['candidate_0.tif'], 'hand_fim.tif')
+        self.assertEqual(m['names']['candidate_1.tif'], 'model_b.tif')
+        self.assertEqual(m['source'], 'fimbench')
+
+    def test_append_numbering_continues_after_existing_candidates(self):
+        upload_id, prefix = self._stage(candidates=2)
+        r = self._post({'upload_id': upload_id, 'candidates': ['third.tif']})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(json.loads(r.content)['targets'][0]['key'], prefix + 'candidate_2.tif')
+
+    def test_append_accepts_boundary_bundle(self):
+        upload_id, prefix = self._stage()
+        r = self._post({'upload_id': upload_id, 'candidates': ['c.tif'],
+                        'boundary': ['aoi.shp', 'aoi.shx', 'aoi.dbf', 'aoi.prj']})
+        self.assertEqual(r.status_code, 200)
+        keys = [t['key'] for t in json.loads(r.content)['targets'] if t['field'] == 'boundary']
+        self.assertEqual(keys, [prefix + 'boundary/' + n for n in ('aoi.shp', 'aoi.shx', 'aoi.dbf', 'aoi.prj')])
+
+    def test_append_to_another_users_upload_is_404(self):
+        upload_id, _ = self._stage(user=self.other)
+        r = self._post({'upload_id': upload_id, 'candidates': ['c.tif']})
+        self.assertEqual(r.status_code, 404)
+
+    def test_append_to_unknown_upload_is_404(self):
+        r = self._post({'upload_id': str(uuid.uuid4()), 'candidates': ['c.tif']})
+        self.assertEqual(r.status_code, 404)
+
+    def test_append_rejects_malformed_upload_id(self):
+        r = self._post({'upload_id': '../../etc', 'candidates': ['c.tif']})
+        self.assertEqual(r.status_code, 400)
+
+    def test_append_without_staged_benchmark_is_400(self):
+        upload_id, _ = self._stage(benchmark=False)
+        r = self._post({'upload_id': upload_id, 'candidates': ['c.tif']})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('benchmark', json.loads(r.content)['error'])
+
+    def test_append_requires_candidates(self):
+        upload_id, _ = self._stage()
+        r = self._post({'upload_id': upload_id, 'candidates': []})
+        self.assertEqual(r.status_code, 400)
+
+    def test_append_refuses_a_second_benchmark(self):
+        upload_id, _ = self._stage()
+        r = self._post({'upload_id': upload_id, 'benchmark': 'other_BM.tif', 'candidates': ['c.tif']})
+        self.assertEqual(r.status_code, 400)
+
+    def test_append_validates_like_fresh_path(self):
+        upload_id, _ = self._stage()
+        bad_ext = self._post({'upload_id': upload_id, 'candidates': ['c.png']})
+        self.assertEqual(bad_ext.status_code, 400)
+        too_many = self._post({'upload_id': upload_id, 'candidates': [f'c{i}.tif' for i in range(50)]})
+        self.assertEqual(too_many.status_code, 400)
+        no_shp = self._post({'upload_id': upload_id, 'candidates': ['c.tif'], 'boundary': ['aoi.dbf']})
+        self.assertEqual(no_shp.status_code, 400)
+
+
 class TestPresignEndpoint(TethysTestCase):
     """POST /api/upload/presign mints presigned PUT URLs so the browser uploads
     files directly to MinIO; Django never receives the bytes."""

@@ -45,6 +45,14 @@ def _output_prefix(user_id, upload_id, run_id=None):
     return f'{base}{run_id}/' if run_id else base
 
 
+_UPLOAD_ID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def _is_upload_id(value):
+    """True for the uuid4 strings this app mints (never a path fragment)."""
+    return isinstance(value, str) and bool(_UPLOAD_ID_RE.fullmatch(value.lower()))
+
+
 def _upload_prefix(user_id, upload_id):
     """S3 prefix for a job's uploaded inputs."""
     return f'{S3_KEY_PREFIX}uploads/{user_id}/{upload_id}/'
@@ -371,6 +379,14 @@ def api_upload_presign(request):
     Note: extension and count are validated here, but a plain presigned PUT
     cannot enforce a per-file size cap server-side (the browser talks straight
     to MinIO), so ``MAX_UPLOAD_BYTES`` is advisory/client-side for this path.
+
+    **Append mode (FIMEVAL-BE53):** with ``upload_id`` in the body the benchmark
+    is already staged (e.g. by the FIMbench handoff, BE52) and the request only
+    adds candidates (+ optional boundary) to that upload. The prefix must belong
+    to the requesting user and hold ``benchmark.tif`` (404 otherwise — no
+    existence leak), ``benchmark`` must be absent, candidate numbering continues
+    after any existing ``candidate_N.tif``, and ``manifest.json`` names are
+    merged. Validation is the same code path as a fresh upload.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -383,15 +399,24 @@ def api_upload_presign(request):
     benchmark = body.get('benchmark')
     candidates = body.get('candidates') or []
     boundary = body.get('boundary') or []
+    existing_upload_id = body.get('upload_id')
 
-    if not benchmark:
+    if existing_upload_id is not None:
+        if not _is_upload_id(existing_upload_id):
+            return JsonResponse({'error': 'invalid upload_id'}, status=400)
+        if benchmark:
+            return JsonResponse(
+                {'error': 'this upload already has a benchmark; send candidates only'},
+                status=400,
+            )
+    elif not benchmark:
         return JsonResponse({'error': 'benchmark file is required'}, status=400)
     if not candidates:
         return JsonResponse({'error': 'at least one candidate file is required'}, status=400)
     if len(candidates) > MAX_CANDIDATES:
         return JsonResponse({'error': f'too many candidates (max {MAX_CANDIDATES})'}, status=400)
 
-    for name in [benchmark, *candidates]:
+    for name in [*([benchmark] if benchmark else []), *candidates]:
         err = _validate_filename(name, RASTER_EXT)
         if err:
             return JsonResponse({'error': err}, status=400)
@@ -405,19 +430,47 @@ def api_upload_presign(request):
                 {'error': 'shapefile bundle must include a .shp file'}, status=400,
             )
 
-    upload_id = str(uuid.uuid4())
     user_id = str(request.user.id)
-    prefix = _upload_prefix(user_id, upload_id)
     storage = _get_storage()
+    existing_names = {}
+    first_index = 0
+    if existing_upload_id is not None:
+        upload_id = existing_upload_id
+        prefix = _upload_prefix(user_id, upload_id)
+        try:
+            # Ownership is implicit in the prefix (it embeds the user id): another
+            # user's upload_id simply doesn't exist under this user's prefix → 404.
+            staged = storage.list_prefix(prefix)
+        except (ClientError, BotoCoreError) as exc:
+            logger.error('Presign (append) listing failed for %s: %s', upload_id, exc)
+            return JsonResponse({'error': 'storage unavailable'}, status=503)
+        if not staged:
+            return JsonResponse({'error': 'upload not found'}, status=404)
+        if f'{prefix}benchmark.tif' not in staged:
+            return JsonResponse({'error': 'no benchmark staged for this upload'}, status=400)
+        first_index = sum(
+            1 for k in staged if re.fullmatch(r'candidate_\d+\.tif', k[len(prefix):])
+        )
+        try:
+            existing_names = json_module.loads(
+                storage.get_object(f'{prefix}manifest.json')['Body'].read()
+            ) or {}
+        except Exception:  # no/unreadable manifest: names start fresh
+            existing_names = {}
+    else:
+        upload_id = str(uuid.uuid4())
+        prefix = _upload_prefix(user_id, upload_id)
 
     try:
-        targets = [{
-            'field': 'benchmark',
-            'filename': benchmark,
-            'key': f'{prefix}benchmark.tif',
-            'url': storage.presigned_put_url(f'{prefix}benchmark.tif'),
-        }]
-        for i, name in enumerate(candidates):
+        targets = []
+        if benchmark:
+            targets.append({
+                'field': 'benchmark',
+                'filename': benchmark,
+                'key': f'{prefix}benchmark.tif',
+                'url': storage.presigned_put_url(f'{prefix}benchmark.tif'),
+            })
+        for i, name in enumerate(candidates, start=first_index):
             key = f'{prefix}candidate_{i}.tif'
             targets.append({
                 'field': 'candidate', 'filename': name, 'key': key,
@@ -439,9 +492,11 @@ def api_upload_presign(request):
     # with them (the stored keys are renamed benchmark.tif / candidate_i.tif).
     # Control-plane metadata only — no uploaded file bytes pass through Django.
     try:
-        names = {os.path.basename(t['key']): t['filename'] for t in targets}
+        names = dict(existing_names.get('names') or {})
+        names.update({os.path.basename(t['key']): t['filename'] for t in targets})
+        manifest = dict(existing_names, names=names)
         storage.upload_bytes(
-            json_module.dumps({'names': names}).encode('utf-8'),
+            json_module.dumps(manifest).encode('utf-8'),
             f'{prefix}manifest.json',
         )
     except (ClientError, BotoCoreError) as exc:
