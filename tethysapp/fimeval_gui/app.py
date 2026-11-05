@@ -2,6 +2,7 @@ import os
 
 from tethys_sdk.base import TethysAppBase
 from tethys_sdk.app_settings import CustomSetting, SchedulerSetting
+from tethys_sdk.handoff import HandoffHandler
 
 # BE47: reproject offline in the web server too (the worker already does — BE28). The
 # contingency-map tile endpoints ask rio-tiler for the COG's WGS84 bounds; with
@@ -68,6 +69,16 @@ class App(TethysAppBase):
                 required=True,
             ),
             CustomSetting(
+                name='handoff_allowed_hosts',
+                type=CustomSetting.TYPE_STRING,
+                description=(
+                    'Hosts the FIMbench "Run in FIMeval" handoff may fetch a benchmark '
+                    'from, comma-separated (BE52). Leave blank for the SDML bucket, '
+                    'sdmlab.s3.amazonaws.com.'
+                ),
+                required=False,
+            ),
+            CustomSetting(
                 name='basemap_layers',
                 type=CustomSetting.TYPE_STRING,
                 description=(
@@ -76,6 +87,17 @@ class App(TethysAppBase):
                     'order; leave blank for all three (Satellite default).'
                 ),
                 required=False,
+            ),
+        )
+
+    def handoff_handlers(self):
+        # BE52: FIMbench's "Run in FIMeval" button lands on
+        # /handoff/fimeval-gui/run-evaluation/?benchmark_url=…&benchmark_name=…
+        return (
+            HandoffHandler(
+                name='run-evaluation',
+                handler='fimeval_gui.handoff.run_evaluation',  # Tethys prepends 'tethysapp.'
+                internal=False,
             ),
         )
 
