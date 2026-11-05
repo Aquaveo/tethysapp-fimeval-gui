@@ -87,11 +87,21 @@ export interface PresignResult {
 
 // Ask the server for a fresh upload_id + a presigned PUT URL per file. Only the
 // filenames travel to Django here; the bytes go straight to MinIO via putFile().
+// With `existingUploadId` (FE65/BE53) the benchmark is already staged — e.g. by
+// the FIMbench handoff — so `benchmark` is null and only candidates (+ boundary)
+// are added to that upload.
 export async function presignUpload(
-  benchmark: File,
+  benchmark: File | null,
   candidates: File[],
   boundary: File[] = [],
+  existingUploadId?: string,
 ): Promise<PresignResult> {
+  const manifest: Record<string, unknown> = {
+    candidates: candidates.map((f) => f.name),
+    boundary: boundary.map((f) => f.name),
+  };
+  if (existingUploadId) manifest.upload_id = existingUploadId;
+  else if (benchmark) manifest.benchmark = benchmark.name;
   const response = await fetch(`${API_BASE}/upload/presign/`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -99,11 +109,7 @@ export async function presignUpload(
       'Content-Type': 'application/json',
       'X-CSRFToken': await csrfToken(),
     },
-    body: JSON.stringify({
-      benchmark: benchmark.name,
-      candidates: candidates.map((f) => f.name),
-      boundary: boundary.map((f) => f.name),
-    }),
+    body: JSON.stringify(manifest),
   });
   if (!response.ok) return parseError(response);
   return response.json();
