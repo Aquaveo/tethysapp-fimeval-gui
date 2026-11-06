@@ -2,10 +2,11 @@
 // Guided 3-step New Evaluation wizard (Upload → Method → Run) in the detail pane.
 // Reuses the presign → direct-to-MinIO upload → submit path and the FE24
 // too-large/downsample modal; on success it routes to the new run (no pop-up).
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import Dropzone from './Dropzone';
 import { presignUpload, putFile, submitJob, SubmitTooLargeError, type TooLargeInfo } from './api';
+import { parseHandoff } from './handoffState';
 import {
   DEFAULT_BOOTSTRAP_FORM, validateBootstrapForm, bootstrapSummary, formFromBootstrapParams,
   type BootstrapForm, type BootstrapParams,
@@ -86,6 +87,19 @@ export default function NewEvaluation() {
   const reuseUploadId = reuse?.uploadId ?? null;
   const reuseHasBoundary = !!reuse?.hasBoundary;
 
+  // FE65: opened from FIMbench's "Run in FIMeval" (BE52 staged the benchmark).
+  // The query is read once into state and then cleared from the URL so a
+  // refresh doesn't re-enter handoff mode; "Start over" drops the staged file.
+  const [handoff] = useState(() => parseHandoff(location.search));
+  const [, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (handoff) setSearchParams({}, { replace: true });
+  }, [handoff, setSearchParams]);
+  const [staged, setStaged] = useState<{ uploadId: string; name: string } | null>(
+    handoff?.uploadId ? { uploadId: handoff.uploadId, name: handoff.name } : null,
+  );
+  const [handoffError, setHandoffError] = useState<string | null>(handoff?.error ?? null);
+
   // In reuse mode the files are already uploaded — start at Method (step 2).
   const [step, setStep] = useState(reuseMode ? 2 : 1);
   const [benchmark, setBenchmark] = useState<File | null>(null);
@@ -128,8 +142,8 @@ export default function NewEvaluation() {
     ? 'A candidate has the same name as the benchmark — pick a different candidate.'
     : null;
 
-  const step1Valid = benchmark !== null && candidates.length > 0
-    && !benchmarkBmError && !candidateBmError && !dupNameError;
+  const step1Valid = (staged !== null || (benchmark !== null && !benchmarkBmError && !dupNameError))
+    && candidates.length > 0 && !candidateBmError;
   // In reuse mode we can't add a boundary (no upload step), so AOI is only valid
   // if the reused run already has one.
   const step2Valid = (reuseMode ? (!isAOI || reuseHasBoundary) : (!isAOI || hasShp))
@@ -164,20 +178,21 @@ export default function NewEvaluation() {
       return;
     }
 
-    if (!benchmark) return;
+    if (!benchmark && !staged) return;
     setError(null);
     setTooLarge(null);
     setSubmitting(true);
     let uploadId: string | null = null;
     try {
+      // FE65: with a staged benchmark, presign adds candidates to that upload.
       const { upload_id, targets } = await presignUpload(
-        benchmark, candidates, isAOI ? boundary : [],
+        staged ? null : benchmark, candidates, isAOI ? boundary : [], staged?.uploadId,
       );
       uploadId = upload_id;
 
       // Pair each presigned target with its File (match by field + filename).
       const pool: { field: string; file: File }[] = [
-        { field: 'benchmark', file: benchmark },
+        ...(benchmark && !staged ? [{ field: 'benchmark', file: benchmark }] : []),
         ...candidates.map((f) => ({ field: 'candidate', file: f })),
         ...(isAOI ? boundary : []).map((f) => ({ field: 'boundary', file: f })),
       ];
@@ -268,18 +283,34 @@ export default function NewEvaluation() {
       <div className="ne-card">
         {step === 1 && (
           <div className="ne-body">
-            <span className="ne-label">Benchmark raster</span>
-            <Dropzone label="Drop a .tif here" multiple={false} accept={['.tif', '.tiff']}
-              onAccepted={(f) => setBenchmark(f[0])} />
-            {benchmark && (
-              <div className="ne-selected">
-                <span className="ne-tick" aria-hidden="true">✓</span>
-                <span className="ne-fname">{benchmark.name}</span>
-                <button type="button" className="ne-x" aria-label="Remove benchmark"
-                  onClick={() => setBenchmark(null)}>✕</button>
-              </div>
+            {handoffError && (
+              <p className="ne-hint ne-hint-err" role="alert">
+                {handoffError} Upload a benchmark below instead.
+                <button type="button" className="ne-link-btn" onClick={() => setHandoffError(null)}>Dismiss</button>
+              </p>
             )}
-            {benchmarkBmError && <p className="ne-hint ne-hint-err">{benchmarkBmError}</p>}
+            <span className="ne-label">Benchmark raster</span>
+            {staged ? (
+              <div className="ne-selected ne-staged">
+                <span className="ne-tick" aria-hidden="true">✓</span>
+                <span className="ne-fname">Benchmark: from FIMbench ({staged.name})</span>
+                <button type="button" className="ne-link-btn" onClick={() => setStaged(null)}>Start over</button>
+              </div>
+            ) : (
+              <>
+                <Dropzone label="Drop a .tif here" multiple={false} accept={['.tif', '.tiff']}
+                  onAccepted={(f) => setBenchmark(f[0])} />
+                {benchmark && (
+                  <div className="ne-selected">
+                    <span className="ne-tick" aria-hidden="true">✓</span>
+                    <span className="ne-fname">{benchmark.name}</span>
+                    <button type="button" className="ne-x" aria-label="Remove benchmark"
+                      onClick={() => setBenchmark(null)}>✕</button>
+                  </div>
+                )}
+                {benchmarkBmError && <p className="ne-hint ne-hint-err">{benchmarkBmError}</p>}
+              </>
+            )}
 
             <span className="ne-label">Candidate raster(s)</span>
             <Dropzone label="Drop one or more .tif here" multiple accept={['.tif', '.tiff']}
@@ -449,7 +480,7 @@ export default function NewEvaluation() {
               <div className="ne-review-row"><span className="ne-k">Inputs</span><span>Re-using this run&rsquo;s uploaded files</span></div>
             ) : (
               <>
-                <div className="ne-review-row"><span className="ne-k">Benchmark</span><span>{benchmark?.name}</span></div>
+                <div className="ne-review-row"><span className="ne-k">Benchmark</span><span>{staged ? `${staged.name} (from FIMbench)` : benchmark?.name}</span></div>
                 <div className="ne-review-row"><span className="ne-k">Candidates</span><span>{candidates.map((c) => c.name).join(', ')}</span></div>
                 {isAOI && (
                   <div className="ne-review-row"><span className="ne-k">Boundary</span><span>{boundary.map((b) => b.name).join(', ')}</span></div>

@@ -4,7 +4,8 @@
 // production (/apps/fimeval-gui/) and at / in dev — basename derives from Vite's
 // BASE_URL so deep links resolve in both. Tethys's catch_all serves index.html
 // for any sub-path, so /runs/:jobId survives a refresh.
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
+import IndexRedirect from './IndexRedirect';
 import AppShell from './AppShell';
 import NewEvaluation from './NewEvaluation';
 import RunDetail from './RunDetail';
@@ -18,7 +19,7 @@ export const router = createBrowserRouter(
       path: '/',
       element: <AppShell />,
       children: [
-        { index: true, element: <Navigate to="/new" replace /> },
+        { index: true, element: <IndexRedirect /> },
         { path: 'new', element: <NewEvaluation /> },
         { path: 'runs/:jobId', element: <RunDetail /> },
         { path: 'docs', element: <Docs /> },
